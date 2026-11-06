@@ -1,0 +1,37 @@
+{
+  "name": "umrah-hajj-ai-assistant",
+  "version": "1.0.0",
+  "description": "AI-powered Umrah & Hajj travel assistant backend with Gemini chat, local jamaah search, and SGO Admin auto-scraping",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "umrah",
+    "hajj",
+    "express",
+    "gemini",
+    "sgo",
+    "ai-assistant"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "puppeteer": "^22.15.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "allowScripts": {
+    "puppeteer@22.15.0": true
+  }
+}

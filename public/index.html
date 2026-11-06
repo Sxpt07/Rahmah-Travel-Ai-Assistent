@@ -1,0 +1,2692 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rahmah Travel AI Console</title>
+  <meta name="description" content="Executive AI console Rahmah Travel — real-time SGO jamaah & manifest intelligence">
+  <link rel="icon" type="image/png" href="/assets/logo.png">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gold: {
+              50: '#FFFBEB',
+              100: '#FEF3C7',
+              200: '#FDE68A',
+              300: '#FCD34D',
+              400: '#FBBF24',
+              500: '#F59E0B',
+              600: '#D97706',
+              700: '#B45309',
+              800: '#92400E',
+              900: '#78350F',
+              950: '#451A03'
+            },
+            ink: {
+              950: '#0D0F12',
+              900: '#111419',
+              850: '#151920',
+              800: '#1A1F27'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            display: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif']
+          },
+          opacity: {
+            8: '0.08',
+            12: '0.12',
+            14: '0.14',
+            15: '0.15',
+            16: '0.16',
+            18: '0.18',
+            22: '0.22'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --gold: #F59E0B;
+      --canvas: #0B0C0F;
+      --line: rgba(255, 255, 255, 0.04);
+      --line-strong: rgba(255, 255, 255, 0.075);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      background: var(--canvas);
+      background-image: none;
+    }
+
+    ::selection {
+      background: rgba(245, 158, 11, 0.32);
+      color: #FFF8E7;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.10);
+      border-radius: 999px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .sidebar-panel {
+      background: #090A0D;
+      border-right: 1px solid var(--line);
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .header-shell {
+      background: var(--canvas);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .chat-canvas {
+      background-image: none;
+    }
+
+    .brand-plate {
+      position: relative;
+      background: #F7F3E9;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      box-shadow: none;
+    }
+
+    .brand-plate::after {
+      content: none;
+    }
+
+    .brand-plate img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .field {
+      width: 100%;
+      border-radius: 0.7rem;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.02);
+      padding: 0.62rem 0.8rem;
+      font-size: 0.8125rem;
+      line-height: 1.25rem;
+      color: #F3F4F6;
+      outline: none;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .field::placeholder {
+      color: #5B616B;
+    }
+
+    .field:hover {
+      border-color: var(--line-strong);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .field:focus {
+      border-color: rgba(245, 158, 11, 0.55);
+      background: rgba(255, 255, 255, 0.03);
+      box-shadow: none;
+    }
+
+    select.field option {
+      background: #111419;
+      color: #F3F4F6;
+    }
+
+    .btn-primary {
+      background: #F59E0B;
+      color: #1A1203;
+      box-shadow: none;
+      transition: background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #FBBF24;
+      box-shadow: none;
+      filter: none;
+      transform: none;
+    }
+
+    .btn-primary:active:not(:disabled) {
+      background: #D97706;
+      transform: none;
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-ghost {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: #B8BEC8;
+      transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+      border-color: var(--line-strong);
+      background: rgba(255, 255, 255, 0.035);
+      color: #F3F4F6;
+    }
+
+    .btn-ghost:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      white-space: nowrap;
+    }
+
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      overflow: hidden;
+    }
+
+    .stat-item {
+      position: relative;
+      min-width: 0;
+      padding: 0.85rem 1.1rem;
+    }
+
+    .stat-item+.stat-item {
+      border-left: 1px solid var(--line);
+    }
+
+    .stat-item:nth-child(3) {
+      border-left: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .stat-item:nth-child(4) {
+      border-top: 1px solid var(--line);
+    }
+
+    .stat-item--primary {
+      background: transparent;
+    }
+
+    .stat-label {
+      display: flex;
+      align-items: center;
+      gap: 0.42rem;
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #7E8590;
+    }
+
+    .stat-value {
+      margin-top: 0.45rem;
+      font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      color: #F5F6F8;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-item--primary .stat-value {
+      font-size: 1.55rem;
+      color: #FFFFFF;
+    }
+
+    @media (min-width: 640px) {
+      .stat-strip {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .stat-item:nth-child(3),
+      .stat-item:nth-child(4) {
+        border-top: 0;
+      }
+
+      .stat-item:nth-child(3) {
+        border-left: 1px solid var(--line);
+      }
+    }
+
+    .nav-eyebrow {
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #6E7580;
+    }
+
+    .module-nav {
+      position: relative;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 0.75rem;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .module-nav:hover:not(:disabled) {
+      transform: none;
+      border-color: transparent;
+      background: rgba(255, 255, 255, 0.028);
+    }
+
+    .module-nav.is-active {
+      border-color: var(--line);
+      background: rgba(255, 255, 255, 0.022);
+      box-shadow: inset 2px 0 0 0 #F59E0B;
+    }
+
+    .module-nav:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .module-nav .nav-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      flex-shrink: 0;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      color: #7E8590;
+      transition: color 0.2s ease;
+    }
+
+    .module-nav:hover .nav-icon {
+      color: #C4CAD3;
+    }
+
+    .module-nav.is-active .nav-icon {
+      background: transparent;
+      color: #F59E0B;
+      box-shadow: none;
+    }
+
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      border-radius: 999px;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      font-size: 0.5rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #A7ADB7;
+    }
+
+    .dropzone {
+      position: relative;
+      border: 1px dashed rgba(255, 255, 255, 0.12);
+      background: transparent;
+      border-radius: 0.85rem;
+      padding: 0.9rem;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .dropzone:hover,
+    .dropzone.is-dragover {
+      border-color: rgba(245, 158, 11, 0.55);
+      background: rgba(245, 158, 11, 0.035);
+      box-shadow: none;
+      transform: none;
+    }
+
+    .dropzone:focus-visible {
+      outline: 1px solid rgba(245, 158, 11, 0.6);
+      outline-offset: 2px;
+    }
+
+    /* Isolasi tab view: atribut hidden selalu menang atas utility display. */
+    #view-monitoring[hidden],
+    #view-manifest[hidden],
+    #wa-modal[hidden] {
+      display: none !important;
+    }
+
+    .view-panel {
+      min-height: 0;
+    }
+
+    .view-switch {
+      border: 0;
+      background: transparent;
+      border-radius: 0;
+      gap: 0.15rem;
+    }
+
+    .view-switch-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      border-radius: 0.5rem;
+      padding: 0.4rem 0.55rem;
+      font-size: 0.625rem;
+      font-weight: 600;
+      color: #79808B;
+      transition: color 0.18s ease, background 0.18s ease;
+    }
+
+    .view-switch-btn:hover {
+      color: #D7DBE1;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .view-switch-btn.is-active {
+      background: transparent;
+      color: #F5F6F8;
+      box-shadow: none;
+    }
+
+    .view-switch-btn.is-active::after {
+      content: '';
+      position: absolute;
+      left: 0.55rem;
+      right: 0.55rem;
+      bottom: -0.32rem;
+      height: 1.5px;
+      border-radius: 999px;
+      background: #F59E0B;
+    }
+
+    .manifest-filter-btn {
+      position: relative;
+      border-radius: 0.4rem;
+      padding: 0.4rem 0.55rem;
+      font-size: 0.625rem;
+      font-weight: 600;
+      color: #79808B;
+      white-space: nowrap;
+      transition: color 0.18s ease, background 0.18s ease;
+    }
+
+    .manifest-filter-btn:hover {
+      color: #D7DBE1;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .manifest-filter-btn.is-active {
+      background: transparent;
+      color: #F5F6F8;
+      box-shadow: none;
+    }
+
+    .manifest-filter-btn.is-active::after {
+      content: '';
+      position: absolute;
+      left: 0.55rem;
+      right: 0.55rem;
+      bottom: 0.05rem;
+      height: 1.5px;
+      border-radius: 999px;
+      background: #F59E0B;
+    }
+
+    .doc-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 0;
+      font-size: 0.625rem;
+      font-weight: 500;
+      line-height: 1rem;
+      white-space: nowrap;
+      color: #8B919C;
+    }
+
+    .doc-chip .doc-mark {
+      font-size: 0.68rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .doc-chip.is-complete {
+      border: 0;
+      background: transparent;
+      color: #7F8B84;
+    }
+
+    .doc-chip.is-complete .doc-mark {
+      color: #34D399;
+    }
+
+    .doc-chip.is-missing {
+      border: 0;
+      background: transparent;
+      color: #8B8588;
+    }
+
+    .doc-chip.is-missing .doc-mark {
+      color: #F87171;
+    }
+
+    .doc-chip.is-process {
+      border: 0;
+      background: transparent;
+      color: #8B8580;
+    }
+
+    .doc-chip.is-process .doc-mark {
+      color: #F59E0B;
+    }
+
+    .manifest-row {
+      position: relative;
+      cursor: default;
+      transition: background 0.2s ease;
+    }
+
+    .manifest-row+.manifest-row {
+      border-top: 1px solid var(--line);
+    }
+
+    .manifest-row:hover {
+      background: rgba(255, 255, 255, 0.016);
+    }
+
+    .manifest-avatar {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--line);
+      color: #C9A15F;
+    }
+
+    .manifest-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+
+    .manifest-status.is-complete {
+      border: 0;
+      background: transparent;
+      color: #6EE7B7;
+    }
+
+    .manifest-status.is-incomplete {
+      border: 0;
+      background: transparent;
+      color: #FCA5A5;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    .progress-fill.is-complete {
+      background: #34D399;
+    }
+
+    .progress-fill.is-partial {
+      background: #F59E0B;
+    }
+
+    .progress-fill.is-low {
+      background: #F87171;
+    }
+
+    .manifest-note.is-complete {
+      color: #6EE7B7;
+    }
+
+    .manifest-note.is-process {
+      color: #FCD34D;
+    }
+
+    .manifest-note.is-missing {
+      color: #FCA5A5;
+    }
+
+    .wa-draft {
+      min-height: 16rem;
+      line-height: 1.65;
+    }
+
+    .view-panel.view-enter {
+      animation: view-enter 0.22s ease both;
+    }
+
+    @keyframes view-enter {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .chat-jamaah-results {
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .chat-jamaah-card {
+      border: 1px solid var(--line);
+      border-radius: 0.8rem;
+      background: rgba(255, 255, 255, 0.014);
+      padding: 0.8rem 0.9rem;
+      transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+    }
+
+    .chat-jamaah-card:hover {
+      border-color: var(--line-strong);
+      background: rgba(255, 255, 255, 0.024);
+      box-shadow: none;
+      transform: translateY(-1px);
+    }
+
+    .chat-doc-chip {
+      padding: 0;
+      font-size: 0.5625rem;
+      line-height: 0.9rem;
+    }
+
+    .chat-manage-btn {
+      border: 0;
+      background: transparent;
+      color: #D9B678;
+      white-space: nowrap;
+      transition: color 0.18s ease, background 0.18s ease;
+    }
+
+    .chat-manage-btn:hover {
+      border: 0;
+      background: rgba(255, 255, 255, 0.035);
+      color: #FDE68A;
+      transform: none;
+    }
+
+    .chat-manage-btn:focus-visible {
+      outline: 2px solid rgba(245, 158, 11, 0.55);
+      outline-offset: 2px;
+    }
+
+    .chat-manage-btn:disabled {
+      opacity: 0.55;
+      cursor: wait;
+      transform: none;
+    }
+
+    #manifest-search.is-target {
+      border-color: rgba(245, 158, 11, 0.6) !important;
+      box-shadow: none;
+    }
+
+    .results-enter {
+      animation: results-enter 0.25s ease both;
+    }
+
+    @keyframes results-enter {
+      from {
+        opacity: 0.35;
+        transform: translateY(4px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .view-panel.view-enter,
+      .results-enter {
+        animation: none !important;
+      }
+    }
+
+    details>summary {
+      list-style: none;
+      cursor: pointer;
+    }
+
+    details>summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details[open] .details-chevron {
+      transform: rotate(180deg);
+    }
+
+    .details-chevron {
+      transition: transform 0.2s ease;
+    }
+
+    .message-bubble {
+      animation: slideUp 0.28s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(9px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message-enter {
+      animation: messageIn 0.3s ease-out;
+    }
+
+    @keyframes messageIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.995);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .typing-dot {
+      animation: bounce 1.3s infinite;
+      background: #F59E0B;
+      box-shadow: none;
+    }
+
+    .typing-dot:nth-child(2) {
+      animation-delay: 0.18s;
+    }
+
+    .typing-dot:nth-child(3) {
+      animation-delay: 0.36s;
+    }
+
+    @keyframes bounce {
+
+      0%,
+      60%,
+      100% {
+        transform: translateY(0);
+      }
+
+      30% {
+        transform: translateY(-6px);
+      }
+    }
+
+    .toast {
+      animation: slideIn 0.28s ease-out, fadeOut 0.3s ease-in 3.1s forwards;
+      background: #111317;
+      border: 1px solid var(--line-strong);
+      backdrop-filter: none;
+      box-shadow: 0 24px 60px -34px rgba(0, 0, 0, 0.95);
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(18px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes fadeOut {
+      to {
+        opacity: 0;
+        transform: translateX(12px);
+      }
+    }
+
+    .shimmer {
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 25%, rgba(255, 255, 255, 0.07) 50%, rgba(255, 255, 255, 0.03) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+
+    @keyframes shimmer {
+      0% {
+        background-position: -200% 0;
+      }
+
+      100% {
+        background-position: 200% 0;
+      }
+    }
+
+    .ai-markdown {
+      line-height: 1.68;
+      word-break: break-word;
+    }
+
+    .ai-markdown p {
+      margin: 0;
+    }
+
+    .ai-markdown p+p {
+      margin-top: 0.42rem;
+    }
+
+    .ai-markdown strong {
+      color: #FDE68A;
+      font-weight: 700;
+    }
+
+    .ai-markdown em {
+      color: #CBD5E1;
+    }
+
+    .ai-markdown ul,
+    .ai-markdown ol {
+      margin: 0.38rem 0 0.38rem 1.1rem;
+      padding: 0;
+    }
+
+    .ai-markdown ul {
+      list-style: disc;
+    }
+
+    .ai-markdown ol {
+      list-style: decimal;
+    }
+
+    .ai-markdown li {
+      margin: 0.2rem 0;
+      padding-left: 0.14rem;
+    }
+
+    .ai-markdown li::marker {
+      color: #F59E0B;
+    }
+
+    .ai-markdown code {
+      background: rgba(255, 255, 255, 0.045);
+      color: #FCD34D;
+      border: 0;
+      border-radius: 0.3rem;
+      padding: 0.08rem 0.3rem;
+      font-size: 0.78rem;
+    }
+
+    .ai-markdown .ai-indent {
+      margin-left: 0.9rem;
+      color: #A9AEB6;
+    }
+
+    .ai-markdown .ai-spacer {
+      height: 0.38rem;
+    }
+
+    .composer-shell {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--line);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .composer-shell:focus-within {
+      border-color: rgba(245, 158, 11, 0.42);
+      background: rgba(255, 255, 255, 0.028);
+      box-shadow: none;
+    }
+
+    .composer-shell textarea {
+      min-height: 2.5rem;
+    }
+
+    .composer-shell textarea::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .quick-action {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: #9299A4;
+      cursor: pointer;
+      transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .quick-action:hover {
+      transform: none;
+      border-color: rgba(255, 255, 255, 0.10);
+      background: rgba(255, 255, 255, 0.03);
+      color: #E7C98F;
+    }
+
+    /* Flat interaction utilities */
+    .num {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .fade-in {
+      animation: fadeIn 0.35s ease both;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .row-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      border: 0;
+      border-radius: 0.45rem;
+      background: transparent;
+      padding: 0.42rem 0.55rem;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: #9AA1AC;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color 0.18s ease, background 0.18s ease;
+    }
+
+    .row-action:hover {
+      background: rgba(255, 255, 255, 0.04);
+      color: #FCD34D;
+    }
+
+    .row-action:focus-visible,
+    .module-nav:focus-visible,
+    .view-switch-btn:focus-visible,
+    .manifest-filter-btn:focus-visible,
+    .quick-action:focus-visible {
+      outline: 1px solid rgba(245, 158, 11, 0.6);
+      outline-offset: 2px;
+    }
+
+    .row-action.is-primary {
+      color: #E2A33C;
+    }
+
+    /* Runtime status accents: keep semantics, remove glow */
+    #server-health>div.bg-gold-400 {
+      background-color: #34D399 !important;
+      box-shadow: none !important;
+    }
+
+    #server-health span.text-gold-100 {
+      color: #9AA1AC !important;
+    }
+
+    #monitoring-sync-dot {
+      box-shadow: none !important;
+    }
+
+    #ai-provider span.text-gold-200 {
+      color: #9AA1AC !important;
+    }
+
+    .manifest-progress-track {
+      height: 3px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.055);
+    }
+
+    .sidebar-rule {
+      border-top: 1px solid var(--line);
+    }
+
+    /* Dynamic chat markup generated by app.js */
+    .message-bubble [class*="backdrop-blur"] {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    .message-bubble [class*="bg-gradient-to-"] {
+      background-image: none !important;
+    }
+
+    .message-bubble:not(.flex-row-reverse)>div:first-child {
+      background: rgba(245, 158, 11, 0.10) !important;
+      border: 1px solid rgba(245, 158, 11, 0.20) !important;
+      box-shadow: none !important;
+      border-radius: 0.6rem !important;
+    }
+
+    .message-bubble:not(.flex-row-reverse)>div:first-child svg {
+      color: #F59E0B !important;
+      stroke: #F59E0B !important;
+    }
+
+    .message-bubble.flex-row-reverse>div:first-child {
+      background: transparent !important;
+      border: 1px solid var(--line) !important;
+      box-shadow: none !important;
+      border-radius: 0.6rem !important;
+    }
+
+    .message-bubble.flex-row-reverse>div:first-child svg {
+      color: #A7ADB7 !important;
+      stroke: #A7ADB7 !important;
+    }
+
+    .message-bubble.flex-row-reverse div.rounded-2xl {
+      background: rgba(245, 158, 11, 0.07) !important;
+      border: 1px solid rgba(245, 158, 11, 0.16) !important;
+      box-shadow: none !important;
+    }
+
+    .message-bubble .ai-markdown {
+      background: rgba(255, 255, 255, 0.018) !important;
+      border: 1px solid var(--line) !important;
+      box-shadow: none !important;
+    }
+
+    .message-bubble .ai-markdown[class*="border-red-400"] {
+      background: rgba(248, 113, 113, 0.045) !important;
+      border-color: rgba(248, 113, 113, 0.22) !important;
+    }
+
+    .message-bubble .ai-markdown strong {
+      color: #F3D9A4;
+    }
+
+    .message-bubble [class*="shadow-["] {
+      box-shadow: none !important;
+    }
+
+    .message-bubble .chat-jamaah-card {
+      box-shadow: none;
+    }
+
+    /* Flatten runtime-generated mode and meta badges */
+    #chat-mode-chip {
+      border: 0 !important;
+      background: transparent !important;
+      padding: 0 !important;
+    }
+
+    .message-bubble [class*="rounded-full"][class*="border"] {
+      border: 0 !important;
+      background-color: transparent !important;
+      padding: 0 !important;
+    }
+
+    @media (max-width: 640px) {
+      .ai-markdown {
+        font-size: 0.8125rem;
+      }
+    }
+
+    @media (max-width: 1023px) {
+      #ai-provider {
+        display: none !important;
+      }
+    }
+
+    @media (max-width: 1023px) {
+      #sgo-live-badge {
+        display: none !important;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+    /* =========================================================
+       Neo-glass visual layer — floating glass, wide whitespace
+       ========================================================= */
+    :root {
+      --canvas: #07080B;
+      --gold: #F59E0B;
+      --glass-line: rgba(255, 255, 255, 0.09);
+      --glass-line-strong: rgba(255, 255, 255, 0.16);
+      --glass-soft: rgba(255, 255, 255, 0.035);
+      --glass-glow: 0 24px 60px -42px rgba(0, 0, 0, 0.95);
+    }
+
+    body {
+      background-color: var(--canvas);
+      background-image:
+        radial-gradient(58rem 42rem at 8% -12%, rgba(245, 158, 11, 0.12), transparent 62%),
+        radial-gradient(46rem 38rem at 100% 105%, rgba(56, 189, 248, 0.075), transparent 64%),
+        radial-gradient(40rem 30rem at 55% 35%, rgba(99, 102, 241, 0.05), transparent 72%);
+      background-attachment: fixed;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: radial-gradient(80rem 50rem at 50% -20%, rgba(255, 255, 255, 0.045), transparent 62%);
+    }
+
+    header.header-shell {
+      background: linear-gradient(145deg, rgba(26, 28, 35, 0.72), rgba(12, 13, 18, 0.62));
+      border: 1px solid var(--glass-line);
+      border-radius: 1.25rem;
+      box-shadow: 0 24px 60px -44px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(24px) saturate(140%);
+      -webkit-backdrop-filter: blur(24px) saturate(140%);
+    }
+
+    aside.sidebar-panel {
+      background: linear-gradient(165deg, rgba(24, 26, 33, 0.82), rgba(12, 13, 18, 0.76));
+      border-color: var(--glass-line);
+      box-shadow: 0 34px 90px -52px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(28px) saturate(135%);
+      -webkit-backdrop-filter: blur(28px) saturate(135%);
+    }
+
+    main.workspace-panel {
+      background: linear-gradient(160deg, rgba(23, 25, 31, 0.70), rgba(12, 13, 17, 0.66));
+      border: 1px solid var(--glass-line);
+      box-shadow: 0 34px 90px -56px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.045);
+      backdrop-filter: blur(26px) saturate(130%);
+      -webkit-backdrop-filter: blur(26px) saturate(130%);
+    }
+
+    .chat-canvas {
+      background-image: radial-gradient(34rem 22rem at 50% 0%, rgba(245, 158, 11, 0.045), transparent 68%);
+    }
+
+    .brand-plate {
+      background: linear-gradient(155deg, #FFFDF7, #F1EAD9);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 0.9rem;
+      box-shadow: 0 14px 30px -22px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+
+    .brand-plate::after {
+      content: none;
+    }
+
+    .field {
+      border-radius: 0.9rem;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(255, 255, 255, 0.045);
+      color: #F4F5F7;
+      transition: all 0.3s ease-out;
+    }
+
+    .field::placeholder {
+      color: #646B76;
+    }
+
+    .field:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .field:focus {
+      border-color: rgba(245, 158, 11, 0.55);
+      background: rgba(255, 255, 255, 0.06);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.10), 0 0 28px -14px rgba(245, 158, 11, 0.45);
+    }
+
+    select.field option {
+      background: #15161C;
+      color: #F4F5F7;
+    }
+
+    .btn-primary {
+      border-radius: 0.85rem;
+      background: linear-gradient(180deg, #FBBF24, #F59E0B);
+      color: #1A1203;
+      box-shadow: 0 14px 32px -18px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+      transition: all 0.3s ease-out;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(180deg, #FCD34D, #F59E0B);
+      box-shadow: 0 20px 44px -18px rgba(245, 158, 11, 0.72), 0 0 0 1px rgba(245, 158, 11, 0.22);
+      filter: none;
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:active:not(:disabled) {
+      background: linear-gradient(180deg, #F59E0B, #D97706);
+      transform: translateY(0) scale(0.985);
+    }
+
+    .btn-primary:focus-visible,
+    .btn-ghost:focus-visible {
+      outline: 2px solid rgba(245, 158, 11, 0.7);
+      outline-offset: 2px;
+    }
+
+    .btn-ghost {
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 0.75rem;
+      color: #BEC4CD;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: all 0.3s ease-out;
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+      border-color: rgba(245, 158, 11, 0.28);
+      background: rgba(255, 255, 255, 0.07);
+      color: #FFFFFF;
+      box-shadow: 0 12px 30px -22px rgba(245, 158, 11, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .status-chip {
+      gap: 0.45rem;
+      border-radius: 999px;
+      padding: 0.28rem 0.15rem;
+      transition: all 0.3s ease-out;
+    }
+
+    #sgo-live-badge {
+      border: 1px solid rgba(245, 158, 11, 0.16);
+      border-radius: 999px;
+      background: rgba(245, 158, 11, 0.06);
+      padding: 0.4rem 0.75rem;
+      transition: all 0.3s ease-out;
+    }
+
+    #sgo-live-badge:hover {
+      border-color: rgba(245, 158, 11, 0.3);
+      background: rgba(245, 158, 11, 0.09);
+      box-shadow: 0 0 24px -14px rgba(245, 158, 11, 0.55);
+    }
+
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+      overflow: visible;
+    }
+
+    .stat-strip .stat-item {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--glass-line);
+      border-radius: 1.15rem;
+      background: linear-gradient(155deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.015));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 20px 44px -36px rgba(0, 0, 0, 0.95);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      transition: all 0.3s ease-out;
+    }
+
+    .stat-strip .stat-item::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 8%;
+      right: 40%;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.28), transparent);
+      opacity: 0.45;
+    }
+
+    .stat-strip .stat-item:hover {
+      transform: translateY(-2px);
+      border-color: rgba(245, 158, 11, 0.22);
+      box-shadow: 0 26px 54px -34px rgba(0, 0, 0, 0.95), 0 0 30px -18px rgba(245, 158, 11, 0.45);
+    }
+
+    .stat-strip .stat-item--primary {
+      border-color: rgba(245, 158, 11, 0.20);
+      background: linear-gradient(150deg, rgba(245, 158, 11, 0.13), rgba(255, 255, 255, 0.022) 58%);
+    }
+
+    .stat-strip .stat-item--primary::before {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.75), transparent);
+      opacity: 0.8;
+    }
+
+    .stat-strip .stat-item + .stat-item,
+    .stat-strip .stat-item:nth-child(3),
+    .stat-strip .stat-item:nth-child(4) {
+      border-left: 1px solid var(--glass-line);
+      border-top: 1px solid var(--glass-line);
+    }
+
+    .stat-strip .stat-item:nth-child(odd) {
+      border-left: 1px solid var(--glass-line);
+    }
+
+    .stat-strip .stat-item:nth-child(1),
+    .stat-strip .stat-item:nth-child(2) {
+      border-top: 1px solid var(--glass-line);
+    }
+
+    .stat-strip .stat-item--primary {
+      border-color: rgba(245, 158, 11, 0.20);
+    }
+
+    .stat-label {
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      color: #8A919C;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stat-value {
+      margin-top: 0.5rem;
+      font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif;
+      font-size: 1.45rem;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      color: #F7F8FA;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-item--primary .stat-value {
+      font-size: 1.6rem;
+      color: #FFFFFF;
+    }
+
+    @media (min-width: 768px) {
+      .stat-strip {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .stat-strip .stat-item {
+        border-top: 1px solid var(--glass-line);
+        border-left: 1px solid var(--glass-line);
+      }
+
+      .stat-strip .stat-item:nth-child(1) {
+        border-left: 1px solid var(--glass-line);
+      }
+    }
+
+    .module-nav {
+      border: 1px solid transparent;
+      border-radius: 1rem;
+      background: transparent;
+      transition: all 0.3s ease-out;
+    }
+
+    .module-nav:hover:not(:disabled) {
+      transform: translateY(-1px);
+      border-color: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    .module-nav.is-active {
+      border-color: rgba(245, 158, 11, 0.20);
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(255, 255, 255, 0.028) 72%);
+      box-shadow: inset 3px 0 0 0 #F59E0B, 0 16px 36px -28px rgba(245, 158, 11, 0.45);
+    }
+
+    .module-nav .nav-icon {
+      border-radius: 0.7rem;
+      background: rgba(255, 255, 255, 0.05);
+      color: #8B929D;
+      transition: all 0.3s ease-out;
+    }
+
+    .module-nav:hover .nav-icon {
+      color: #D7DBE1;
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .module-nav.is-active .nav-icon {
+      background: rgba(245, 158, 11, 0.14);
+      color: #F59E0B;
+      box-shadow: 0 0 22px -10px rgba(245, 158, 11, 0.55);
+    }
+
+    .live-pill {
+      border-radius: 999px;
+      color: #B9C0C9;
+    }
+
+    .sidebar-rule {
+      border-top: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .dropzone {
+      border: 1px dashed rgba(255, 255, 255, 0.16);
+      border-radius: 1.1rem;
+      background: rgba(255, 255, 255, 0.035);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      transition: all 0.3s ease-out;
+    }
+
+    .dropzone:hover,
+    .dropzone.is-dragover {
+      border-color: rgba(245, 158, 11, 0.52);
+      background: rgba(245, 158, 11, 0.055);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.06), 0 20px 42px -30px rgba(245, 158, 11, 0.45);
+      transform: translateY(-1px);
+    }
+
+    .view-switch {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 0.9rem;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 0.2rem;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .view-switch-btn {
+      border-radius: 0.7rem;
+      padding: 0.42rem 0.68rem;
+      color: #99A0AB;
+      transition: all 0.3s ease-out;
+    }
+
+    .view-switch-btn:hover {
+      color: #E4E7EB;
+      background: rgba(255, 255, 255, 0.055);
+    }
+
+    .view-switch-btn.is-active {
+      color: #FDE68A;
+      background: rgba(245, 158, 11, 0.13);
+      box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.22), 0 0 22px -12px rgba(245, 158, 11, 0.55);
+    }
+
+    .view-switch-btn.is-active::after {
+      content: none;
+    }
+
+    #manifest-filter {
+      border: 1px solid rgba(255, 255, 255, 0.075) !important;
+      border-radius: 0.9rem;
+      background: rgba(255, 255, 255, 0.035);
+      padding: 0.2rem;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .manifest-filter-btn {
+      border-radius: 0.68rem;
+      padding: 0.42rem 0.68rem;
+      color: #99A0AB;
+      transition: all 0.3s ease-out;
+    }
+
+    .manifest-filter-btn:hover {
+      color: #E4E7EB;
+      background: rgba(255, 255, 255, 0.055);
+    }
+
+    .manifest-filter-btn.is-active {
+      color: #FDE68A;
+      background: rgba(245, 158, 11, 0.13);
+      box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.22);
+    }
+
+    .manifest-filter-btn.is-active::after {
+      content: none;
+    }
+
+    .doc-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      border: 1px solid rgba(255, 255, 255, 0.075);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.035);
+      padding: 0.18rem 0.52rem;
+      font-size: 0.6rem;
+      font-weight: 500;
+      line-height: 1.15rem;
+      white-space: nowrap;
+      color: #9AA1AC;
+      transition: all 0.3s ease-out;
+    }
+
+    .doc-chip:hover {
+      border-color: rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .doc-chip.is-complete {
+      border-color: rgba(52, 211, 153, 0.16);
+      background: rgba(52, 211, 153, 0.07);
+      color: #A7F3D0;
+    }
+
+    .doc-chip.is-complete .doc-mark {
+      color: #34D399;
+    }
+
+    .doc-chip.is-missing {
+      border-color: rgba(248, 113, 113, 0.16);
+      background: rgba(248, 113, 113, 0.065);
+      color: #FECACA;
+    }
+
+    .doc-chip.is-missing .doc-mark {
+      color: #F87171;
+    }
+
+    .doc-chip.is-process {
+      border-color: rgba(245, 158, 11, 0.18);
+      background: rgba(245, 158, 11, 0.07);
+      color: #FDE68A;
+    }
+
+    .doc-chip.is-process .doc-mark {
+      color: #F59E0B;
+    }
+
+    #manifest-list {
+      border: 1px solid var(--glass-line);
+      border-radius: 1.25rem;
+      background: rgba(255, 255, 255, 0.025);
+      box-shadow: 0 24px 60px -46px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      overflow: hidden;
+    }
+
+    #manifest-list .manifest-row {
+      padding: 1.05rem 1rem;
+      transition: all 0.3s ease-out;
+    }
+
+    #manifest-list .manifest-row:hover {
+      background: rgba(255, 255, 255, 0.045);
+      box-shadow: inset 2px 0 0 rgba(245, 158, 11, 0.55);
+    }
+
+    .manifest-row + .manifest-row {
+      border-top: 1px solid rgba(255, 255, 255, 0.055);
+    }
+
+    .manifest-avatar {
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 0.85rem;
+      background: linear-gradient(155deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+      color: #D8DCE3;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .manifest-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      border-radius: 999px;
+      padding: 0.18rem 0.55rem;
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      transition: all 0.3s ease-out;
+    }
+
+    .manifest-status.is-complete {
+      border: 1px solid rgba(52, 211, 153, 0.16);
+      background: rgba(52, 211, 153, 0.07);
+      color: #6EE7B7;
+    }
+
+    .manifest-status.is-incomplete {
+      border: 1px solid rgba(248, 113, 113, 0.16);
+      background: rgba(248, 113, 113, 0.06);
+      color: #FCA5A5;
+    }
+
+    .manifest-progress-track {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.075);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      border-radius: 999px;
+      transition: width 0.3s ease-out;
+    }
+
+    .chat-jamaah-card {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 1rem;
+      background: rgba(255, 255, 255, 0.035);
+      padding: 0.85rem 0.95rem;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      transition: all 0.3s ease-out;
+    }
+
+    .chat-jamaah-card:hover {
+      border-color: rgba(245, 158, 11, 0.22);
+      background: rgba(255, 255, 255, 0.05);
+      box-shadow: 0 18px 38px -32px rgba(0, 0, 0, 0.95), 0 0 26px -18px rgba(245, 158, 11, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .chat-manage-btn {
+      border: 1px solid transparent;
+      border-radius: 0.6rem;
+      background: rgba(255, 255, 255, 0.03);
+      color: #D9B678;
+      white-space: nowrap;
+      transition: all 0.3s ease-out;
+    }
+
+    .chat-manage-btn:hover {
+      border-color: rgba(245, 158, 11, 0.20);
+      background: rgba(245, 158, 11, 0.10);
+      color: #FDE68A;
+      transform: none;
+    }
+
+    #manifest-search.is-target {
+      border-color: rgba(245, 158, 11, 0.6) !important;
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.10), 0 0 30px -14px rgba(245, 158, 11, 0.5) !important;
+    }
+
+    .quick-action {
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      background: rgba(255, 255, 255, 0.035);
+      color: #9AA1AC;
+      cursor: pointer;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: all 0.3s ease-out;
+    }
+
+    .quick-action:hover {
+      transform: translateY(-1px);
+      border-color: rgba(245, 158, 11, 0.28);
+      background: rgba(245, 158, 11, 0.075);
+      color: #FDE68A;
+      box-shadow: 0 14px 30px -26px rgba(245, 158, 11, 0.55);
+    }
+
+    .composer-shell {
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 1.15rem;
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 22px 55px -44px rgba(0, 0, 0, 0.95);
+      transition: all 0.3s ease-out;
+    }
+
+    .composer-shell:focus-within {
+      border-color: rgba(245, 158, 11, 0.42);
+      background: rgba(255, 255, 255, 0.06);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 3px rgba(245, 158, 11, 0.08), 0 24px 60px -44px rgba(245, 158, 11, 0.35);
+    }
+
+    .row-action {
+      border: 1px solid transparent;
+      border-radius: 0.65rem;
+      background: rgba(255, 255, 255, 0.035);
+      color: #A6ADB8;
+      transition: all 0.3s ease-out;
+    }
+
+    .row-action:hover {
+      border-color: rgba(245, 158, 11, 0.20);
+      background: rgba(245, 158, 11, 0.09);
+      color: #FCD34D;
+      box-shadow: 0 12px 26px -22px rgba(245, 158, 11, 0.55);
+    }
+
+    .row-action.is-primary {
+      color: #E9B75C;
+    }
+
+    .toast {
+      background: rgba(20, 21, 27, 0.80);
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 1rem;
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      box-shadow: 0 28px 70px -38px rgba(0, 0, 0, 0.98), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    #manifest-search {
+      transition: all 0.3s ease-out;
+    }
+
+    /* Desktop sidebar collapse */
+    @media (min-width: 1024px) {
+      #sidebar {
+        transition: width 0.3s ease-out, opacity 0.3s ease-out, transform 0.3s ease-out, margin 0.3s ease-out;
+      }
+
+      body.sidebar-collapsed #sidebar {
+        width: 0 !important;
+        min-width: 0 !important;
+        margin-right: -1rem;
+        border-width: 0;
+        opacity: 0;
+        transform: translateX(-1.5rem);
+        pointer-events: none;
+      }
+
+      body.sidebar-collapsed .sidebar-rail-hint {
+        display: none;
+      }
+    }
+
+    #server-health > div.bg-gold-400 {
+      background-color: #34D399 !important;
+      box-shadow: 0 0 12px -3px rgba(52, 211, 153, 0.55) !important;
+    }
+
+    #monitoring-sync-dot {
+      box-shadow: 0 0 12px -3px currentColor !important;
+    }
+
+    #ai-provider span.text-gold-200 {
+      color: #9AA1AC !important;
+    }
+
+    /* Chat bubbles generated by app.js — soft glass, no heavy boxes */
+    .message-bubble [class*="backdrop-blur"] {
+      backdrop-filter: blur(20px) !important;
+      -webkit-backdrop-filter: blur(20px) !important;
+    }
+
+    .message-bubble:not(.flex-row-reverse) > div:first-child {
+      background: rgba(245, 158, 11, 0.10) !important;
+      border: 1px solid rgba(245, 158, 11, 0.20) !important;
+      box-shadow: 0 0 26px -14px rgba(245, 158, 11, 0.45) !important;
+      border-radius: 0.85rem !important;
+    }
+
+    .message-bubble:not(.flex-row-reverse) > div:first-child svg {
+      color: #F59E0B !important;
+      stroke: #F59E0B !important;
+    }
+
+    .message-bubble.flex-row-reverse > div:first-child {
+      background: rgba(245, 158, 11, 0.10) !important;
+      border: 1px solid rgba(245, 158, 11, 0.20) !important;
+      box-shadow: 0 0 26px -14px rgba(245, 158, 11, 0.4) !important;
+      border-radius: 0.85rem !important;
+    }
+
+    .message-bubble.flex-row-reverse div.rounded-2xl {
+      background-color: rgba(245, 158, 11, 0.10) !important;
+      background-image: linear-gradient(135deg, rgba(245, 158, 11, 0.20), rgba(245, 158, 11, 0.06)) !important;
+      border: 1px solid rgba(245, 158, 11, 0.22) !important;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+      backdrop-filter: blur(18px) !important;
+      -webkit-backdrop-filter: blur(18px) !important;
+    }
+
+    .message-bubble .ai-markdown {
+      background: rgba(255, 255, 255, 0.04) !important;
+      border: 1px solid rgba(255, 255, 255, 0.09) !important;
+      box-shadow: 0 22px 55px -44px rgba(0, 0, 0, 0.95) !important;
+      backdrop-filter: blur(20px) !important;
+      -webkit-backdrop-filter: blur(20px) !important;
+    }
+
+    .message-bubble .ai-markdown[class*="border-red-400"] {
+      background: rgba(248, 113, 113, 0.06) !important;
+      border-color: rgba(248, 113, 113, 0.22) !important;
+    }
+
+    .message-bubble .ai-markdown strong {
+      color: #F3D9A4;
+    }
+
+    .message-bubble [class*="rounded-full"][class*="border"] {
+      border: 1px solid rgba(255, 255, 255, 0.10) !important;
+      background-color: rgba(255, 255, 255, 0.045) !important;
+      padding: 0.16rem 0.52rem !important;
+      border-radius: 999px !important;
+    }
+
+    .message-bubble [class*="shadow-["] {
+      box-shadow: none !important;
+    }
+
+    .message-bubble .chat-jamaah-card {
+      box-shadow: none;
+    }
+
+    #chat-mode-chip {
+      border: 0 !important;
+      background: transparent !important;
+      padding: 0 !important;
+    }
+
+    /* WhatsApp modal — floating glass dialog */
+    #wa-modal {
+      background: rgba(4, 5, 8, 0.62);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    #wa-modal:not([hidden]) {
+      display: flex;
+    }
+
+    #wa-modal > div {
+      background: linear-gradient(160deg, rgba(28, 30, 37, 0.92), rgba(14, 15, 20, 0.88));
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 1.6rem;
+      box-shadow: 0 40px 110px -50px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(28px) saturate(135%);
+      -webkit-backdrop-filter: blur(28px) saturate(135%);
+    }
+
+    .wa-draft {
+      background: rgba(255, 255, 255, 0.035);
+      min-height: 16rem;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 1023px) {
+      .stat-label {
+        font-size: 0.56rem;
+        letter-spacing: 0.08em;
+      }
+    }
+
+    @media (max-width: 639px) {
+      .stat-strip .stat-item {
+        padding: 0.85rem 0.9rem;
+      }
+
+      .stat-value {
+        font-size: 1.3rem;
+      }
+
+      .stat-item--primary .stat-value {
+        font-size: 1.4rem;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stat-strip .stat-item:hover,
+      .module-nav:hover:not(:disabled),
+      .btn-primary:hover:not(:disabled),
+      .btn-ghost:hover:not(:disabled),
+      .dropzone:hover,
+      .quick-action:hover {
+        transform: none !important;
+      }
+    }
+
+  </style>
+</head>
+
+<body class="relative font-sans h-screen overflow-hidden flex flex-col text-slate-100 antialiased">
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed top-20 right-4 z-[80] flex w-full max-w-sm flex-col gap-2"></div>
+
+  <!-- Header -->
+  <header
+    class="header-shell relative z-20 mx-3 mt-3 flex flex-shrink-0 items-center justify-between gap-3 px-3.5 py-3 sm:mx-4 sm:px-5">
+    <div class="flex min-w-0 items-center gap-3">
+      <button id="sidebar-toggle" type="button" aria-label="Buka atau sembunyikan sidebar" aria-controls="sidebar"
+        aria-expanded="true"
+        class="btn-ghost inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl">
+        <i data-lucide="panel-left" class="h-4 w-4"></i>
+      </button>
+
+      <div class="min-w-0">
+        <div class="flex items-center gap-2.5">
+          <h1 class="font-display truncate text-[15px] font-semibold tracking-tight text-white">
+            Executive <span class="text-slate-300">AI Console</span>
+          </h1>
+          <span
+            class="hidden whitespace-nowrap text-[9px] font-semibold uppercase tracking-[0.16em] text-slate-600 md:inline">
+            Rahmah Travel
+          </span>
+        </div>
+        <p class="hidden truncate text-[11px] text-slate-500 sm:block">SGO operations • real-time intelligence</p>
+      </div>
+    </div>
+
+    <div class="flex flex-shrink-0 items-center gap-2">
+      <div id="top-view-switch" class="view-switch flex items-center gap-0.5" role="tablist"
+        aria-label="Pilih modul utama">
+        <button type="button" data-view-path="/ops/monitoring-jamaah" role="tab" aria-selected="true"
+          id="tab-monitoring" aria-controls="view-monitoring" aria-label="Monitoring Jamaah" title="Monitoring Jamaah"
+          class="view-switch-btn is-active">
+          <i data-lucide="bar-chart-3" class="h-3 w-3"></i>
+          <span class="hidden md:inline">Monitoring</span>
+        </button>
+        <button type="button" data-view-path="/ops/upload-documents" role="tab" aria-selected="false"
+          id="tab-manifest" aria-controls="view-manifest" aria-label="Upload Manifest dan Cek Dokumen" title="Upload Manifest & Cek Dokumen"
+          class="view-switch-btn">
+          <i data-lucide="file-check-2" class="h-3 w-3"></i>
+          <span class="hidden md:inline">Manifest</span>
+        </button>
+      </div>
+
+      <div id="sgo-live-badge" class="hidden items-center gap-2 px-2">
+        <span class="relative flex h-1.5 w-1.5">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold-400 opacity-60"></span>
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-gold-400"></span>
+        </span>
+        <span id="sgo-live-badge-text" class="text-[11px] font-medium text-slate-400">SGO Live • 0 jamaah</span>
+      </div>
+
+      <div id="ai-provider" class="status-chip">
+        <i data-lucide="cpu" class="h-3.5 w-3.5 text-slate-500"></i>
+        <span class="text-[11px] font-medium text-slate-400">Memuat AI...</span>
+      </div>
+
+      <div
+        class="hidden h-8 w-8 items-center justify-center rounded-full border border-white/[0.06] text-[10px] font-semibold text-slate-400 sm:flex">
+        RT
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="relative z-30 flex min-h-0 flex-1 gap-0 px-3 pb-3 pt-3 sm:px-4 lg:gap-4">
+
+    <!-- Mobile backdrop -->
+    <div id="sidebar-backdrop"
+      class="fixed inset-0 z-30 hidden bg-black/60 backdrop-blur-sm lg:hidden"></div>
+
+    <!-- Left Sidebar -->
+    <aside id="sidebar"
+      class="sidebar-panel fixed inset-y-0 left-0 z-40 flex w-[18.5rem] max-w-[88vw] -translate-x-full flex-col overflow-hidden rounded-r-[1.75rem] border-y-0 border-l-0 border-r border-white/10 transition-all duration-300 ease-out lg:static lg:inset-auto lg:left-auto lg:z-auto lg:h-full lg:w-[18.5rem] lg:translate-x-0 lg:rounded-[1.75rem] lg:border">
+
+      <!-- Brand header -->
+      <div class="px-5 pb-4 pt-5">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3">
+            <div class="brand-plate flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl">
+              <img src="/assets/logo.png" alt="Logo resmi Rahmah Travel" class="h-full w-full object-contain p-1">
+            </div>
+            <div class="min-w-0">
+              <p class="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">Official Console</p>
+              <h2 class="font-display mt-0.5 truncate text-[16px] font-semibold leading-tight tracking-tight text-white">
+                Rahmah Travel
+              </h2>
+              <p class="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-600">AI Console</p>
+            </div>
+          </div>
+          <button id="sidebar-close" type="button" aria-label="Tutup menu"
+            class="btn-ghost inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg lg:hidden">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+        <p class="mt-3.5 text-[11px] leading-relaxed text-slate-500">
+          Executive operations untuk monitoring jamaah & manifest SGO.
+        </p>
+      </div>
+
+      <div class="flex-1 space-y-5 overflow-y-auto px-3.5 py-4">
+
+        <!-- Main menu -->
+        <div class="flex items-center justify-between px-2">
+          <p class="nav-eyebrow">Menu Utama</p>
+          <span class="text-[9px] font-medium uppercase tracking-wider text-slate-600">2 modul</span>
+        </div>
+
+        <nav class="space-y-1" aria-label="Menu modul SGO">
+          <button type="button" data-module-path="/ops/monitoring-jamaah" aria-pressed="true"
+            class="module-nav is-active group w-full p-3 text-left">
+            <div class="flex items-start gap-2.5">
+              <div class="nav-icon">
+                <i data-lucide="bar-chart-3" class="h-4 w-4"></i>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-[12.5px] font-semibold text-slate-100">Monitoring Jamaah</span>
+                  <span class="live-pill flex-shrink-0">
+                    <span class="h-1 w-1 rounded-full bg-gold-400"></span>
+                    Live
+                  </span>
+                </div>
+                <p class="mt-0.5 text-[10.5px] leading-snug text-slate-500">Status sinkronisasi SGO real-time</p>
+                <div id="jamaah-status-text" class="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-500">
+                  <i data-lucide="database" class="h-3 w-3 flex-shrink-0 text-slate-600"></i>
+                  <span class="truncate">Belum ada data real</span>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" data-module-path="/ops/upload-documents" aria-pressed="false"
+            class="module-nav group w-full p-3 text-left">
+            <div class="flex items-start gap-2.5">
+              <div class="nav-icon">
+                <i data-lucide="file-check-2" class="h-4 w-4"></i>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-[12.5px] font-semibold text-slate-100">Upload Manifest</span>
+                  <i data-lucide="chevron-right" class="h-3.5 w-3.5 flex-shrink-0 text-slate-700 transition-all group-hover:translate-x-0.5 group-hover:text-gold-500"></i>
+                </div>
+                <p class="mt-0.5 text-[10.5px] leading-snug text-slate-500">Manifest & kelengkapan dokumen jamaah</p>
+              </div>
+            </div>
+          </button>
+        </nav>
+
+        <!-- Manifest dropzone dipindahkan ke view Upload Manifest. -->
+
+        <!-- Sync module -->
+        <section class="sidebar-rule pt-4">
+          <div class="flex items-start gap-2.5">
+            <div class="flex h-7 w-7 flex-shrink-0 items-center justify-center text-slate-500">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-[12px] font-semibold text-slate-200">Sinkronisasi SGO</h3>
+              <p id="module-hint" class="mt-0.5 text-[10px] leading-relaxed text-slate-500">
+                Data jamaah, NIK, paspor, RTB, dan manifest real-time.
+              </p>
+            </div>
+          </div>
+
+          <!-- Tetap ada untuk kompatibilitas app.js; menu di atas menjadi kontrol utama. -->
+          <label for="moduleSelect" class="sr-only">Pilih modul</label>
+          <select id="moduleSelect" class="sr-only" tabindex="-1" aria-hidden="true">
+            <option value="/ops/monitoring-jamaah">Monitoring Jamaah</option>
+            <option value="/ops/upload-documents">Upload Manifest</option>
+          </select>
+
+          <button id="jamaah-cookie-btn" type="button"
+            class="btn-primary mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[12px] font-semibold">
+            <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+            <span>Sinkronkan Monitoring Jamaah</span>
+          </button>
+
+          <div id="sgo-scrape-progress" class="mt-3 hidden space-y-2">
+            <div class="flex items-center justify-between text-[10px] text-slate-500">
+              <span id="sgo-scrape-status">Memproses...</span>
+              <span id="sgo-scrape-count">[0/1]</span>
+            </div>
+            <div class="h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+              <div id="sgo-scrape-bar"
+                class="h-full rounded-full bg-gold-500 transition-all duration-500"
+                style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="mt-3 flex items-center justify-between gap-2 border-t border-white/[0.04] pt-3">
+            <div class="flex min-w-0 items-center gap-1.5 text-[9.5px] text-slate-600">
+              <i data-lucide="shield-check" class="h-3 w-3 flex-shrink-0 text-slate-600"></i>
+              <span class="truncate">Sumber resmi SGO Admin</span>
+            </div>
+            <button id="jamaah-clear-real" type="button"
+              class="flex-shrink-0 text-[10px] font-medium text-slate-600 transition-colors hover:text-red-400">
+              Hapus data
+            </button>
+          </div>
+        </section>
+
+        <!-- Connection (advanced, collapsed) -->
+        <details class="sidebar-rule group">
+          <summary class="flex items-center justify-between gap-3 py-3">
+            <div class="flex items-center gap-2.5">
+              <div class="flex h-7 w-7 items-center justify-center text-slate-500">
+                <i data-lucide="plug" class="h-3.5 w-3.5"></i>
+              </div>
+              <div>
+                <p class="text-[12px] font-semibold text-slate-300">Koneksi SGO</p>
+                <p class="text-[10px] text-slate-600">Opsional • otomatis dari .env</p>
+              </div>
+            </div>
+            <i data-lucide="chevron-down" class="details-chevron h-3.5 w-3.5 text-slate-600"></i>
+          </summary>
+          <div class="space-y-2 pb-4 pt-1">
+            <label for="jamaah-cookie-url" class="nav-eyebrow">Base URL</label>
+            <input id="jamaah-cookie-url" type="url" placeholder="https://sgo.rahmahgrup.id"
+              class="field">
+            <label for="jamaah-cookie-str" class="nav-eyebrow pt-1">Session cookie</label>
+            <textarea id="jamaah-cookie-str" rows="2" placeholder="sgo_admin_session=... (kosong = .env)"
+              class="field resize-none font-mono text-[11px]"></textarea>
+            <p class="text-[10px] leading-relaxed text-slate-600">Kosongkan untuk memakai konfigurasi aman dari server.</p>
+          </div>
+        </details>
+
+        <!-- Website context (optional, collapsed) -->
+        <details class="sidebar-rule group">
+          <summary class="flex items-center justify-between gap-3 py-3">
+            <div class="flex items-center gap-2.5">
+              <div class="flex h-7 w-7 items-center justify-center text-slate-500">
+                <i data-lucide="globe-2" class="h-3.5 w-3.5"></i>
+              </div>
+              <div>
+                <p class="text-[12px] font-semibold text-slate-300">Website Context</p>
+                <p class="text-[10px] text-slate-600">Knowledge tambahan untuk AI</p>
+              </div>
+            </div>
+            <i data-lucide="chevron-down" class="details-chevron h-3.5 w-3.5 text-slate-600"></i>
+          </summary>
+          <div class="space-y-2 pb-4 pt-1">
+            <label for="url-input" class="nav-eyebrow">URL halaman</label>
+            <input id="url-input" type="url" placeholder="https://travel-agency.com/paket-umrah"
+              class="field">
+            <button id="index-btn" type="button"
+              class="btn-ghost flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] font-medium">
+              <i data-lucide="download" class="h-3.5 w-3.5"></i>
+              <span>Index Website</span>
+            </button>
+
+            <!-- Active Context Status -->
+            <div id="context-status" class="mt-2 border-l border-white/[0.07] py-1 pl-3">
+              <div class="flex items-start gap-2">
+                <div class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-500"></div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-[10.5px] font-medium text-slate-400">Belum ada context</p>
+                  <p class="mt-0.5 text-[10px] leading-relaxed text-slate-600">Index website untuk jawaban yang lebih kontekstual.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Indexed Info -->
+            <div id="indexed-info" class="mt-2 hidden">
+              <div class="border-l border-gold-500/30 py-1 pl-3">
+                <div class="flex items-start gap-2">
+                  <i data-lucide="check-circle-2" class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-gold-400"></i>
+                  <div class="min-w-0 flex-1">
+                    <p class="mb-1 text-[10.5px] font-semibold text-gold-200">Context aktif</p>
+                    <p id="indexed-url" class="mb-1.5 break-all text-[10px] text-slate-400"></p>
+                    <div class="flex items-center justify-between text-[9.5px] text-slate-600">
+                      <span id="indexed-chars"></span>
+                      <span id="indexed-time"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Scraping Animation -->
+            <div id="scraping-state" class="mt-2 hidden">
+              <div class="border-l border-gold-500/30 py-1 pl-3">
+                <div class="mb-2 flex items-center gap-2">
+                  <div class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gold-400 border-t-transparent"></div>
+                  <p class="text-[10.5px] font-medium text-gold-200">Mengindeks website...</p>
+                </div>
+                <div class="space-y-1.5">
+                  <div class="shimmer h-1.5 w-full rounded-full"></div>
+                  <div class="shimmer h-1.5 w-4/5 rounded-full"></div>
+                  <div class="shimmer h-1.5 w-3/5 rounded-full"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Security note -->
+        <div class="flex items-start gap-2.5 px-2 py-1">
+          <i data-lucide="lock-keyhole" class="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-600"></i>
+          <p class="text-[10px] leading-relaxed text-slate-600">
+            Data real tanpa mock. Pencarian jamaah selalu memakai sumber Monitoring Jamaah dan tidak menampilkan PII secara bebas.
+          </p>
+        </div>
+      </div>
+
+      <!-- Sidebar footer: backend & local database -->
+      <div class="border-t border-white/[0.04] px-5 py-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="nav-eyebrow">Backend & local DB</p>
+            <div id="server-health" class="status-chip mt-2">
+              <div class="h-2 w-2 rounded-full bg-slate-500"></div>
+              <span class="text-[11px] font-medium text-slate-300">Menghubungkan...</span>
+            </div>
+          </div>
+          <div class="flex-shrink-0 text-right">
+            <p class="text-[9px] uppercase tracking-[0.16em] text-slate-600">Local store</p>
+            <p id="sidebar-data-count" class="mt-1 text-[11px] font-semibold tabular-nums text-slate-300">0 data</p>
+          </div>
+        </div>
+        <p class="mt-3 text-[9.5px] text-slate-600">Rahmah Travel • secure SGO Admin session</p>
+      </div>
+    </aside>
+
+    <!-- Workspace -->
+    <main
+      class="workspace-panel flex min-w-0 flex-1 flex-col overflow-hidden rounded-[1.6rem] border border-white/10">
+
+      <!-- Monitoring Jamaah View -->
+      <section id="view-monitoring" data-view="monitoring" class="view-panel flex min-h-0 flex-1 flex-col"
+        role="tabpanel" aria-labelledby="tab-monitoring" aria-label="Monitoring Jamaah">
+        <!-- Ringkasan Monitoring -->
+        <div class="px-3 pb-1 pt-4 sm:px-5 sm:pt-5">
+          <div class="mx-auto max-w-4xl">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex min-w-0 flex-1 items-baseline gap-2.5">
+                <h2 class="font-display flex-shrink-0 text-[14px] font-semibold tracking-tight text-slate-100">Monitoring Jamaah</h2>
+                <span id="monitoring-sync-chip" class="flex min-w-0 max-w-[13rem] items-center gap-1.5 sm:max-w-none">
+                  <span id="monitoring-sync-dot" class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-500"></span>
+                  <span id="monitoring-sync-label"
+                    class="min-w-0 truncate text-[10px] font-medium text-slate-500">Memuat
+                    ringkasan...</span>
+                </span>
+              </div>
+              <button id="monitoring-refresh" type="button"
+                class="btn-ghost inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-medium">
+                <i data-lucide="refresh-cw" class="h-3 w-3"></i>
+                <span class="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
+            <div class="stat-strip mt-3 max-w-4xl">
+              <div class="stat-item stat-item--primary">
+                <div class="stat-label">
+                  <i data-lucide="users" class="h-3 w-3 text-slate-600"></i>
+                  Total Jamaah
+                </div>
+                <p id="monitoring-total" class="stat-value">—</p>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">
+                  <i data-lucide="check-circle-2" class="h-3 w-3 text-emerald-400/80"></i>
+                  Dokumen Lengkap
+                </div>
+                <p id="monitoring-complete" class="stat-value text-emerald-300">—</p>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">
+                  <i data-lucide="alert-circle" class="h-3 w-3 text-red-400/80"></i>
+                  Perlu Tindakan
+                </div>
+                <p id="monitoring-incomplete" class="stat-value text-red-300">—</p>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">
+                  <i data-lucide="layers" class="h-3 w-3 text-slate-600"></i>
+                  Kode Order
+                </div>
+                <p id="monitoring-orders" class="stat-value">—</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="mx-3 mb-3 mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.4rem] border border-white/10 bg-white/[0.02] backdrop-blur-xl sm:mx-5 sm:mb-5">
+
+          <!-- Chat Header -->
+          <div class="flex items-center justify-between gap-3 border-b border-white/[0.05] px-4 py-3 sm:px-6">
+          <div class="flex min-w-0 items-center gap-3">
+            <div class="relative flex-shrink-0">
+              <div class="brand-plate flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg">
+                <img src="/assets/logo.png" alt="Rahmah Travel" class="h-full w-full object-contain p-0.5">
+              </div>
+              <span class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0B0C0F] bg-emerald-400"></span>
+            </div>
+            <div class="min-w-0">
+              <h2 class="font-display truncate text-[14px] font-semibold tracking-tight text-slate-100">
+                Rahmah <span class="text-slate-400">AI Concierge</span>
+              </h2>
+              <p id="ai-chat-status" class="flex items-center gap-1.5 truncate text-[10.5px] text-slate-500">
+                <span class="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                Online • siap membantu
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-shrink-0 items-center gap-3">
+            <span id="active-module-chip"
+              class="hidden items-center gap-1.5 text-[10px] font-medium text-slate-500 sm:inline-flex">
+              <i data-lucide="database" class="h-3 w-3 text-slate-600"></i>
+              <span>Monitoring Jamaah</span>
+            </span>
+            <span id="chat-mode-chip"
+              class="hidden items-center gap-1.5 text-[10px] font-semibold text-gold-500/90 sm:inline-flex">
+              <i data-lucide="sparkles" class="h-3 w-3"></i>
+              AI Chat
+            </span>
+            <button id="clear-chat" type="button"
+              class="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[10.5px] font-medium text-slate-500 transition-colors hover:bg-white/[0.035] hover:text-slate-200">
+              <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
+              <span class="hidden sm:inline">Bersihkan</span>
+            </button>
+          </div>
+        </div>
+
+      <!-- Messages Container -->
+      <div id="messages-container"
+        class="chat-canvas flex-1 space-y-4 overflow-y-auto px-4 py-7 scroll-smooth sm:px-8 sm:py-10">
+
+        <!-- Welcome Message -->
+        <div id="welcome-message" class="fade-in mx-auto max-w-3xl py-2 sm:py-6">
+          <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Rahmah Executive Console
+          </p>
+          <h3 class="font-display mt-3 text-[24px] font-semibold tracking-tight text-white sm:text-[28px]">
+            Assalamu'alaikum.
+          </h3>
+          <p class="mt-3 max-w-xl text-[13px] leading-relaxed text-slate-400">
+            Saya siap membantu operasional umrah & haji Anda. Cari data jamaah, cek manifest, atau tanyakan hal lain dengan cepat dan akurat.
+          </p>
+          <div class="mt-7 flex flex-wrap gap-x-6 gap-y-2.5 text-[11px] text-slate-500">
+            <span class="inline-flex items-center gap-1.5">
+              <i data-lucide="database" class="h-3.5 w-3.5 text-slate-600"></i> SGO real-time
+            </span>
+            <span class="inline-flex items-center gap-1.5">
+              <i data-lucide="fingerprint" class="h-3.5 w-3.5 text-slate-600"></i> NIK & paspor
+            </span>
+            <span class="inline-flex items-center gap-1.5">
+              <i data-lucide="file-check-2" class="h-3.5 w-3.5 text-slate-600"></i> Manifest
+            </span>
+          </div>
+          <p class="mt-8 text-[11px] text-slate-600">
+            Gunakan pintasan cepat di atas kolom pesan untuk memulai.
+          </p>
+        </div>
+      </div>
+
+      <!-- Input Bar -->
+      <div class="border-t border-white/[0.05] px-4 pb-4 pt-3 sm:px-6 sm:pb-4">
+        <div class="mx-auto max-w-4xl">
+          <div class="mb-2 flex flex-wrap gap-1.5">
+            <button type="button" data-prompt="Bagaimana cara cek manifest jamaah di SGO?"
+              class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+              <i data-lucide="file-check-2" class="h-3 w-3"></i> Cek Manifest SGO
+            </button>
+            <button type="button" data-prompt="Bagaimana cara mencari kode order jamaah?"
+              class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+              <i data-lucide="search" class="h-3 w-3"></i> Cari Kode Order
+            </button>
+            <button type="button" data-prompt="Bagaimana cara cek status dokumen jamaah?"
+              class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+              <i data-lucide="id-card" class="h-3 w-3"></i> Status Dokumen Jamaah
+            </button>
+          </div>
+
+          <div class="composer-shell flex items-end gap-2 rounded-xl p-2">
+            <div class="mb-0.5 hidden h-9 w-9 flex-shrink-0 items-center justify-center text-slate-600 sm:flex">
+              <i data-lucide="message-square" class="h-4 w-4"></i>
+            </div>
+            <textarea id="chat-input" rows="1" maxlength="2000"
+              placeholder="Tanya seputar umrah, atau cek data jamaah..."
+              class="flex-1 resize-none bg-transparent px-1 py-2 text-[13px] text-slate-100 placeholder:text-slate-600 focus:outline-none max-h-36"></textarea>
+            <button id="send-btn"
+              class="btn-primary flex h-10 w-10 flex-shrink-0 items-center justify-center gap-2 rounded-lg px-0 text-[12px] font-semibold sm:w-auto sm:px-4">
+              <i data-lucide="send" class="h-4 w-4"></i>
+              <span class="hidden sm:inline">Kirim</span>
+            </button>
+          </div>
+
+          <div class="mt-2 flex items-center justify-between gap-3 text-[10px] text-slate-600">
+            <span><kbd class="rounded border border-white/[0.07] bg-white/[0.025] px-1 py-0.5 font-sans text-[9px] text-slate-500">Enter</kbd> kirim • <kbd class="rounded border border-white/[0.07] bg-white/[0.025] px-1 py-0.5 font-sans text-[9px] text-slate-500">Shift+Enter</kbd> baris baru</span>
+            <span id="char-count" class="tabular-nums">0/2000</span>
+          </div>
+        </div>
+      </div>
+        </div>
+      </section>
+
+      <!-- Upload Manifest & Cek Dokumen View -->
+      <section id="view-manifest" data-view="manifest" hidden
+        class="view-panel chat-canvas min-h-0 flex-1 overflow-y-auto"
+        role="tabpanel" aria-labelledby="tab-manifest" aria-label="Upload Manifest dan Cek Dokumen">
+        <div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-7 sm:py-8">
+
+          <!-- View heading + dropzone -->
+          <div class="flex flex-col gap-6 pb-6 lg:flex-row lg:items-end lg:justify-between">
+            <div class="min-w-0">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Manifest Intelligence
+              </p>
+              <h2 class="font-display mt-2 text-[24px] font-semibold tracking-tight text-white sm:text-[26px]">
+                Upload Manifest & Cek Dokumen
+              </h2>
+              <p class="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-slate-400">
+                Pantau kelengkapan KTP, KK, Foto, Paspor, dan Vaksin dari SGO. Generate draf WhatsApp
+                formal untuk jamaah yang dokumennya belum lengkap.
+              </p>
+            </div>
+
+            <div class="w-full flex-shrink-0 lg:w-[22rem]">
+              <div id="manifest-dropzone" role="button" tabindex="0" aria-label="Tarik atau pilih file manifest"
+                class="dropzone">
+                <input id="manifest-file-input" type="file" class="hidden"
+                  accept=".pdf,.xls,.xlsx,.csv,.doc,.docx">
+                <div id="manifest-empty-state" class="pointer-events-none flex items-center gap-3">
+                  <div class="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gold-500/80">
+                    <i data-lucide="upload-cloud" class="h-4 w-4"></i>
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-[11.5px] font-medium text-slate-200">Tarik file manifest ke sini</p>
+                    <p class="mt-0.5 text-[9.5px] text-slate-500">PDF, XLSX, CSV, DOCX • klik untuk pilih</p>
+                  </div>
+                </div>
+                <div id="manifest-file-chip" class="hidden items-center gap-3">
+                  <div class="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gold-500">
+                    <i data-lucide="file-check-2" class="h-4 w-4"></i>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p id="manifest-file-name" class="truncate text-[10.5px] font-semibold text-slate-200"></p>
+                    <p class="text-[9px] text-slate-500">Siap ditinjau • belum dikirim ke server</p>
+                  </div>
+                  <button id="manifest-file-clear" type="button" aria-label="Hapus file"
+                    class="flex-shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-slate-200">
+                    <i data-lucide="x" class="h-3.5 w-3.5"></i>
+                  </button>
+                </div>
+              </div>
+              <p class="mt-2 px-1 text-[9px] leading-relaxed text-slate-600">
+                File hanya ditinjau di sesi ini. Data jamaah tetap ditarik langsung dari SGO Admin.
+              </p>
+            </div>
+          </div>
+
+          <!-- Statistik & pencarian manifest -->
+          <div class="mt-5">
+            <div class="stat-strip">
+              <div class="stat-item stat-item--primary">
+                <div class="stat-label">
+                  <i data-lucide="users" class="h-3 w-3 text-slate-600"></i>
+                  Total Jamaah
+                </div>
+                <p id="manifest-total" class="stat-value">—</p>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">
+                  <i data-lucide="check-circle-2" class="h-3 w-3 text-emerald-400/80"></i>
+                  Dokumen Lengkap
+                </div>
+                <p id="manifest-complete" class="stat-value text-emerald-300">—</p>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">
+                  <i data-lucide="alert-circle" class="h-3 w-3 text-red-400/80"></i>
+                  Perlu Dilengkapi
+                </div>
+                <p id="manifest-incomplete" class="stat-value text-red-300">—</p>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">
+                  <i data-lucide="layers" class="h-3 w-3 text-slate-600"></i>
+                  Kode Order
+                </div>
+                <p id="manifest-orders" class="stat-value">—</p>
+              </div>
+            </div>
+
+            <div
+              class="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 backdrop-blur-xl">
+              <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div class="relative flex-1">
+                  <i data-lucide="search"
+                    class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600"></i>
+                  <input id="manifest-search" type="search" autocomplete="off"
+                    placeholder="Cari nama, kode order, atau no HP..."
+                    class="field w-full pl-9 text-[12px]">
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <div id="manifest-filter" class="flex items-center gap-0.5">
+                    <button type="button" data-manifest-status="all" aria-pressed="true"
+                      class="manifest-filter-btn is-active">Semua</button>
+                    <button type="button" data-manifest-status="incomplete" aria-pressed="false"
+                      class="manifest-filter-btn">Belum Lengkap</button>
+                    <button type="button" data-manifest-status="complete" aria-pressed="false"
+                      class="manifest-filter-btn">Lengkap</button>
+                  </div>
+                  <button id="manifest-refresh" type="button"
+                    class="btn-ghost inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-medium">
+                    <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+              <div class="mt-2.5 flex flex-wrap items-center justify-between gap-2 px-0.5 text-[10px] text-slate-600">
+                <span id="manifest-result-meta" aria-live="polite">Memuat data manifest...</span>
+                <span id="manifest-page-meta" class="tabular-nums"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading skeleton -->
+          <div id="manifest-loading" class="mt-5" aria-hidden="true">
+            <div class="py-4">
+              <div class="flex items-center gap-3">
+                <div class="shimmer h-9 w-9 flex-shrink-0 rounded-lg"></div>
+                <div class="min-w-0 flex-1 space-y-2">
+                  <div class="shimmer h-3 w-1/3 rounded-full"></div>
+                  <div class="shimmer h-2.5 w-2/3 rounded-full"></div>
+                </div>
+              </div>
+              <div class="mt-3 flex gap-1.5">
+                <div class="shimmer h-4 w-14 rounded-full"></div>
+                <div class="shimmer h-4 w-14 rounded-full"></div>
+                <div class="shimmer h-4 w-14 rounded-full"></div>
+              </div>
+            </div>
+            <div class="border-t border-white/[0.04] py-4">
+              <div class="flex items-center gap-3">
+                <div class="shimmer h-9 w-9 flex-shrink-0 rounded-lg"></div>
+                <div class="min-w-0 flex-1 space-y-2">
+                  <div class="shimmer h-3 w-1/4 rounded-full"></div>
+                  <div class="shimmer h-2.5 w-1/2 rounded-full"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Daftar jamaah -->
+          <div id="manifest-list" class="mt-4 hidden" aria-live="polite"></div>
+
+          <!-- Empty state -->
+          <div id="manifest-empty" class="hidden py-14 text-center">
+            <i data-lucide="search-x" class="mx-auto h-7 w-7 text-slate-600"></i>
+            <p id="manifest-empty-title" class="mt-3 text-[13px] font-semibold text-slate-300">Tidak ada data yang
+              cocok</p>
+            <p id="manifest-empty-text" class="mt-1 text-[11px] text-slate-500">Coba kata kunci nama, kode order, atau
+              nomor HP lain.</p>
+          </div>
+
+          <!-- Pagination -->
+          <div id="manifest-pagination"
+            class="mt-6 flex flex-col items-center justify-between gap-2 pb-2 sm:flex-row">
+            <p id="manifest-page-info" class="text-[10.5px] tabular-nums text-slate-500"></p>
+            <div class="flex items-center gap-1.5">
+              <button id="manifest-prev" type="button"
+                class="btn-ghost inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[10px] font-medium disabled:opacity-40">
+                <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>
+                <span>Sebelumnya</span>
+              </button>
+              <span id="manifest-page-chip"
+                class="inline-flex min-w-[4rem] items-center justify-center px-2 py-1.5 text-[10px] font-medium tabular-nums text-slate-400">1
+                / 1</span>
+              <button id="manifest-next" type="button"
+                class="btn-ghost inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[10px] font-medium disabled:opacity-40">
+                <span>Berikutnya</span>
+                <i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- WhatsApp Draft Modal -->
+  <div id="wa-modal" hidden
+    class="fixed inset-0 z-[90] items-center justify-center p-4 sm:p-6"
+    role="dialog" aria-modal="true" aria-labelledby="wa-modal-title" aria-hidden="true">
+    <div class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[1.6rem] border border-white/10">
+      <div class="flex items-start justify-between gap-3 border-b border-white/[0.07] px-5 py-4">
+        <div class="flex min-w-0 items-center gap-3">
+          <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center text-emerald-400">
+            <i data-lucide="message-circle" class="h-4 w-4"></i>
+          </div>
+          <div class="min-w-0">
+            <h2 id="wa-modal-title" class="font-display truncate text-[14px] font-semibold text-white">Draf Pesan
+              WhatsApp</h2>
+            <p id="wa-recipient" class="mt-0.5 truncate text-[10.5px] text-slate-500">—</p>
+          </div>
+        </div>
+        <button id="wa-close-btn" type="button" aria-label="Tutup draf"
+          class="flex-shrink-0 rounded-md p-1.5 text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-slate-200">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+        <label for="wa-draft-text" class="nav-eyebrow">Pesan siap kirim</label>
+        <textarea id="wa-draft-text" readonly rows="14"
+          class="field wa-draft mt-2 w-full resize-none font-mono text-[11.5px]"></textarea>
+        <p class="mt-2 text-[10px] leading-relaxed text-slate-600">
+          Periksa kembali draf sebelum dikirim. Rahmah Travel tidak mengirim pesan secara otomatis.
+        </p>
+      </div>
+
+      <div class="flex items-center justify-between gap-2 border-t border-white/[0.07] px-4 py-3 sm:px-5">
+        <span id="wa-copy-status" class="text-[10px] text-slate-500"></span>
+        <div class="flex flex-shrink-0 items-center gap-2">
+          <button id="wa-close-btn-footer" type="button"
+            class="btn-ghost inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10.5px] font-medium">
+            Tutup
+          </button>
+          <button id="wa-copy-btn" type="button"
+            class="btn-primary inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[10.5px] font-semibold">
+            <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+            <span>Copy Text</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/tab-controller.js"></script>
+  <script src="js/monitoring.js"></script>
+  <script src="js/manifest.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Sidebar desktop collapse/expand. Mobile drawer tetap ditangani app.js.
+    (function setupDesktopSidebarCollapse() {
+      const toggle = document.getElementById('sidebar-toggle');
+      if (!toggle) return;
+      const storageKey = 'rahmah.sidebar.collapsed';
+      const isDesktop = () => window.matchMedia('(min-width: 1024px)').matches;
+      const apply = (collapsed) => {
+        document.body.classList.toggle('sidebar-collapsed', collapsed);
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        toggle.setAttribute('aria-label', collapsed ? 'Buka sidebar' : 'Sembunyikan sidebar');
+      };
+      let stored = false;
+      try {
+        stored = localStorage.getItem(storageKey) === '1';
+      } catch (_) {
+        stored = false;
+      }
+      if (isDesktop()) apply(stored);
+      toggle.addEventListener('click', () => {
+        if (!isDesktop()) return;
+        const collapsed = !document.body.classList.contains('sidebar-collapsed');
+        apply(collapsed);
+        try {
+          localStorage.setItem(storageKey, collapsed ? '1' : '0');
+        } catch (_) {
+          /* localStorage opsional */
+        }
+      });
+      window.addEventListener('resize', () => {
+        if (!isDesktop()) {
+          toggle.setAttribute('aria-expanded', 'true');
+          toggle.setAttribute('aria-label', 'Buka menu');
+          return;
+        }
+        apply(document.body.classList.contains('sidebar-collapsed'));
+      });
+    })();
+    lucide.createIcons();
+  </script>
+</body>
+
+</html>

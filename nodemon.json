@@ -1,0 +1,18 @@
+{
+  "watch": [
+    "server.js",
+    "services",
+    "data",
+    "public"
+  ],
+  "ext": "js,mjs,cjs",
+  "ignore": [
+    "jamaah_data.json",
+    "jamaah_data*.json",
+    "data/*.json",
+    "sgo_raw",
+    "sgo_raw/**",
+    "*.tmp"
+  ],
+  "delay": 300
+}
