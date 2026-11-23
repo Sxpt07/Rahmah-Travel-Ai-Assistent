@@ -1811,11 +1811,13 @@ export async function fetchSgoModule(modulePath, config, options = {}) {
 export async function fetchSgoModulePaginated(modulePath, config, options = {}) {
   const normalizedPath = normalizeModulePath(modulePath);
   const { persistRaw = true, deadline = null } = options;
+  const startPage = Math.max(1, Math.trunc(Number(options.startPage) || 1));
+  const batchMax = Math.max(1, Math.min(Math.trunc(Number(options.maxPages) || PAGINATION_MAX_PAGES), 500));
   const started = Date.now();
-  console.log(`[SGO] Scraping page 1... (${normalizedPath})`);
+  console.log(`[SGO] Scraping page ${startPage}... (${normalizedPath})`);
   const firstPage = await fetchSgoModule(normalizedPath, config, {
-    page: 1,
-    persistRaw,
+    page: startPage,
+    persistRaw: persistRaw && startPage === 1,
   });
 
   const moduleLabel = getSgoModuleMeta(normalizedPath)?.label || normalizedPath;
@@ -1832,12 +1834,15 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     enabled: PAGINATION_ENABLED,
     pageParam: PAGINATION_PAGE_PARAM,
     delayMs: PAGINATION_DELAY_MS,
-    maxPages: PAGINATION_MAX_PAGES,
+    startPage,
+    maxPages: batchMax,
     pagesFetched: 1,
     pagesWithRows: firstPage.rows.length ? 1 : 0,
     rowsOnFirstPage: firstPage.rows.length,
     rows: 0,
     stopReason: 'single-page',
+    hasMore: false,
+    nextPage: null,
     errors: [],
     ms: 0,
   };
@@ -1872,8 +1877,8 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     return { ...firstPage, rows: combinedRows, pagination: finish('disabled') };
   }
 
-  if (PAGINATION_MAX_PAGES <= 1) {
-    return { ...firstPage, rows: combinedRows, pagination: finish('max-pages') };
+  if (batchMax <= 1) {
+    return { ...firstPage, rows: combinedRows, pagination: { ...finish('max-pages'), hasMore: true, nextPage: startPage + 1 } };
   }
 
   if (!firstPage.rows.length) {
@@ -1886,9 +1891,10 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
 
   let lastPage = firstPage;
   let stopReason = 'max-pages';
-  let page = 2;
+  let page = startPage + 1;
+  const lastPageLimit = startPage + batchMax - 1;
 
-  while (page <= PAGINATION_MAX_PAGES) {
+  while (page <= lastPageLimit) {
     if (deadline?.isExpired?.()) {
       stopReason = 'deadline';
       break;
@@ -1966,10 +1972,13 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     stopReason = 'deadline';
   }
   const stats = finish(stopReason);
+  const nextByProbe = ['max-pages', 'deadline'].includes(stats.stopReason) ? page : null;
+  stats.nextPage = nextByProbe;
+  stats.hasMore = Boolean(nextByProbe);
   console.log(
     `[SGO Pagination] ${normalizedPath}: ${stats.pagesFetched} halaman diminta, ` +
       `${stats.pagesWithRows} berisi data, ${stats.rows} jamaah unik ` +
-      `(${stats.ms}ms, stop=${stats.stopReason}).`,
+      `(${stats.ms}ms, stop=${stats.stopReason}, hasMore=${stats.hasMore}).`,
   );
 
   return {
@@ -2059,13 +2068,9 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
   const runtimeMax = VERCEL_RUNTIME
     ? Math.min(UPLOAD_DOCUMENTS_MAX_PAGES, VERCEL_UPLOAD_MAX_PAGES)
     : UPLOAD_DOCUMENTS_MAX_PAGES;
-  const maxPages = Math.max(
-    1,
-    Math.min(
-      Number(options.maxPages) || runtimeMax,
-      500,
-    ),
-  );
+  const startPage = Math.max(1, Math.trunc(Number(options.startPage) || 1));
+  const requestedMax = Number(options.maxPages) || runtimeMax;
+  const maxPages = Math.max(1, Math.min(requestedMax, 500));
   const effectiveMaxPages = PAGINATION_ENABLED ? maxPages : 1;
   const search = String(options.search || '').trim() || UPLOAD_DOCUMENTS_SEARCH;
   const stats = {
@@ -2074,6 +2079,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     search,
     pageParam: PAGINATION_PAGE_PARAM,
     delayMs: PAGINATION_DELAY_MS,
+    startPage,
     maxPages: effectiveMaxPages,
     retryAttempts: SGO_HTTP_RETRY_ATTEMPTS,
     retryBaseMs: SGO_HTTP_RETRY_BASE_MS,
@@ -2088,6 +2094,8 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     recoveredPages: 0,
     unrecoveredPages: [],
     stopReason: 'max-pages',
+    hasMore: false,
+    nextPage: null,
     deadlineMs: Number(deadline?.totalMs) || 0,
     deadlineReached: false,
     errors: [],
@@ -2099,7 +2107,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
   const seenHashes = new Set();
   let firstPage = null;
   let lastPage = null;
-  let page = 1;
+  let page = startPage;
   let stopReason = 'max-pages';
   let consecutiveFailures = 0;
 
@@ -2164,7 +2172,8 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     }
   };
 
-  while (page <= effectiveMaxPages) {
+  const lastPageLimit = startPage + effectiveMaxPages - 1;
+  while (page <= lastPageLimit) {
     if (deadline?.isExpired?.()) {
       stats.deadlineReached = true;
       stopReason = combined.length ? 'deadline' : 'deadline-empty';
@@ -2181,7 +2190,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
       });
       break;
     }
-    if (page > 1 && PAGINATION_DELAY_MS > 0) {
+    if (page > startPage && PAGINATION_DELAY_MS > 0) {
       await delay(PAGINATION_DELAY_MS);
     }
     const searchLabel = search ? `?search=${search}` : '';
@@ -2455,6 +2464,14 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     stopReason = combined.length ? 'deadline' : 'deadline-empty';
   }
 
+  const nextByKnownTotal =
+    stats.totalPagesReported > 0 && page <= stats.totalPagesReported ? page : null;
+  const nextByProbe =
+    stats.totalPagesReported <= 0 && ['max-pages', 'deadline', 'completed-with-gaps'].includes(stopReason)
+      ? page
+      : null;
+  stats.nextPage = nextByKnownTotal || nextByProbe;
+  stats.hasMore = Boolean(stats.nextPage);
   stats.stopReason = stopReason;
   stats.rows = combined.length;
   stats.ms = Date.now() - started;
@@ -2588,7 +2605,7 @@ export async function fetchSingleJamaahFromSgo({
  * Tidak pernah throw untuk kegagalan modul; semua error dikumpulkan di
  * `errors` agar pemanggil bisa memutuskan fallback.
  */
-async function runSgoAttempt({ config, modulePaths, onUploadPage, deadline }) {
+async function runSgoAttempt({ config, modulePaths, onUploadPage, deadline, startPage, batchPages }) {
   const settled = await Promise.allSettled(
     modulePaths.map((modulePath) => {
       const normalizedPath = normalizeModulePath(modulePath);
@@ -2597,10 +2614,12 @@ async function runSgoAttempt({ config, modulePaths, onUploadPage, deadline }) {
           onPageRows:
             typeof onUploadPage === 'function' ? onUploadPage : undefined,
           deadline,
+          startPage,
+          maxPages: batchPages,
         });
       }
       return isJamaahModule(normalizedPath)
-        ? fetchSgoModulePaginated(normalizedPath, config, { deadline })
+        ? fetchSgoModulePaginated(normalizedPath, config, { deadline, startPage, maxPages: batchPages })
         : fetchSgoModule(normalizedPath, config);
     }),
   );
@@ -2687,6 +2706,8 @@ export async function scrapeSgoModules({
   enrichManifest = true,
   onUploadPage,
   deadline,
+  startPage = 1,
+  batchPages = 20,
 } = {}) {
   const requestConfig = resolveSgoConfig({ url, cookie });
   if (!requestConfig.ok) {
@@ -2726,7 +2747,14 @@ export async function scrapeSgoModules({
 
   let config = requestConfig;
   assertNotPastDeadline(scrapeDeadline, 'Sinkronisasi SGO');
-  let attempt = await runSgoAttempt({ config, modulePaths, onUploadPage, deadline: scrapeDeadline });
+  let attempt = await runSgoAttempt({
+    config,
+    modulePaths,
+    onUploadPage,
+    deadline: scrapeDeadline,
+    startPage,
+    batchPages,
+  });
   updateSyncProgress({
     phase: 'merging',
     percent: 81,

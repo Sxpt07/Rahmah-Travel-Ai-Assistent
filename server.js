@@ -423,6 +423,8 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
   const cookie = String(req.body?.cookie || req.body?.cookies || '').trim();
   const requestedFocus = String(req.body?.focusModule || '').trim();
   const enrichManifest = req.body?.skipManifest !== true;
+  const startPage = Math.max(1, Math.trunc(Number(req.body?.startPage) || 1));
+  const batchPages = Math.max(1, Math.min(Math.trunc(Number(req.body?.batchPages) || 20), 40));
 
   let focusModule;
   try {
@@ -472,6 +474,8 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       cookie,
       focusModule,
       enrichManifest,
+      startPage,
+      batchPages,
       onUploadPage: trackLiveManifest
         ? (page) => {
             upsertLiveManifestRows(page?.rows || []);
@@ -564,6 +568,15 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       totalPages: summary.totalPages,
     });
 
+    const paginationEntries = Array.isArray(fast.pagination) ? fast.pagination : [];
+    const primaryPagination =
+      paginationEntries.find((entry) => entry?.modulePath === UPLOAD_DOCUMENTS_PATH) ||
+      paginationEntries.find((entry) => entry?.mode === 'upload-documents') ||
+      paginationEntries[0] ||
+      null;
+    const hasMore = Boolean(primaryPagination?.hasMore);
+    const nextPage = Number(primaryPagination?.nextPage) || null;
+
     return res.json({
       success: true,
       fallback: false,
@@ -575,10 +588,21 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         ? 'Cookie dari UI tidak menghasilkan data; berhasil memakai cookie SGO_ADMIN_SESSION dari .env.'
         : null,
       message: fast.focus
-        ? `Berhasil memuat ${moduleLabel} — ${jamaahList.length.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman SGO.`
-        : `Berhasil mengindeks ${fast.modulesVisited.length}/${SGO_MODULES.length} modul SGO Admin — ${jamaahList.length.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman.`,
+        ? `Berhasil memuat ${moduleLabel} batch halaman ${startPage} - ${jamaahList.length.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman SGO.`
+        : `Berhasil mengindeks ${fast.modulesVisited.length}/${SGO_MODULES.length} modul SGO Admin - ${jamaahList.length.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman.`,
       count: jamaahList.length,
       storedJamaahCount: jamaahList.length,
+      batch: {
+        startPage,
+        batchPages,
+        pagesFetched,
+        nextPage,
+        hasMore,
+        totalPages: Number(primaryPagination?.totalPagesReported) || 0,
+        totalJamaah: Number(primaryPagination?.totalJamaahReported) || 0,
+      },
+      nextPage,
+      hasMore,
       source: getJamaahSource(),
       fieldCoverage,
       manifest: fast.manifestEnrichment || null,
