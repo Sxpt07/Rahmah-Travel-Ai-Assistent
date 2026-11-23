@@ -63,7 +63,7 @@ export const SGO_BROWSER_HEADERS = Object.freeze({
 const VERCEL_RUNTIME = isVercelRuntime();
 const SCRAPE_DEADLINE_MS = Math.max(
   15000,
-  Math.min(envNumber('SGO_SCRAPE_DEADLINE_MS', VERCEL_RUNTIME ? 55000 : 10 * 60 * 1000), 10 * 60 * 1000),
+  Math.min(envNumber('SGO_SCRAPE_DEADLINE_MS', VERCEL_RUNTIME ? 300000 : 10 * 60 * 1000), 300000),
 );
 const VERCEL_MANIFEST_MAX = Math.max(0, Math.min(envNumber('SGO_VERCEL_MANIFEST_MAX', 120), 3500));
 const VERCEL_UPLOAD_MAX_PAGES = Math.max(1, Math.min(envNumber('SGO_VERCEL_UPLOAD_MAX_PAGES', 40), 500));

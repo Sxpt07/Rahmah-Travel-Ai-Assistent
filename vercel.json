@@ -8,7 +8,7 @@
         "includeFiles": [
           "public/**"
         ],
-        "maxDuration": 60
+        "maxDuration": 300
       }
     }
   ],
