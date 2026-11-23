@@ -488,7 +488,11 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         ? 428
         : error.code === 'SGO_CONFIG' || error.code === 'SGO_MODULE'
           ? 400
-          : 502;
+          : error.code === 'SGO_AUTH'
+            ? 401
+            : error.code === 'SGO_DEADLINE'
+              ? 504
+              : 502;
     return res.status(status).json({
       ...buildScrapeFailurePayload({
         error: message,

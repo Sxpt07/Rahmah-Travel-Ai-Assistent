@@ -535,22 +535,22 @@ async function handleJamaahCookieScrape() {
     if (!result.ok) {
       if (!result.busy) {
         const errorData = result.data || {};
+        const errorMessage = String(result.error || errorData.error || 'Gagal sinkronisasi SGO');
         if (
           errorData.code === 'SGO_COOKIE_MISSING' ||
           errorData.code === 'SGO_AUTH'
         ) {
           if (errorData.code === 'SGO_AUTH' && window.RahmahSgoCookie) {
-            window.RahmahSgoCookie.markExpired(result.error || errorData.error);
+            window.RahmahSgoCookie.markExpired(errorMessage);
           } else if (window.RahmahSgoCookie) {
-            window.RahmahSgoCookie.markEmpty(result.error || errorData.error);
+            window.RahmahSgoCookie.markEmpty(errorMessage);
           }
           if (window.RahmahSgoCookie) window.RahmahSgoCookie.open();
         }
-        showToast(
-          'Error',
-          result.error || 'Gagal sinkronisasi SGO',
-          'error',
-        );
+        const detail = String(errorData.detail || '').trim();
+        const toastMessage =
+          detail && detail !== errorMessage ? `${errorMessage}\n${detail}` : errorMessage;
+        showToast('Error', toastMessage, 'error');
       }
       return;
     }

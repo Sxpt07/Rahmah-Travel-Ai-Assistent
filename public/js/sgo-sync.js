@@ -287,10 +287,12 @@
 
       const response = await request;
       let data = {};
+      let rawText = '';
       try {
-        data = await response.json();
+        rawText = await response.text();
+        data = rawText ? JSON.parse(rawText) : {};
       } catch (error) {
-        data = {};
+        data = rawText ? { error: rawText.slice(0, 280) } : {};
       }
 
       if (timer) {
@@ -334,10 +336,18 @@
         return { ok: true, data, progress: done };
       }
 
-      const message = data.error || 'Sinkronisasi SGO gagal.';
+      const detailParts = [
+        data.error || data.message,
+        data.code ? `Kode: ${data.code}` : '',
+        data.detail && data.detail !== data.error ? data.detail : '',
+        !response.ok ? `HTTP ${response.status}` : '',
+      ].filter(Boolean);
+      const message = detailParts[0] || 'Sinkronisasi SGO gagal.';
+      const detail = detailParts.slice(1).join(' • ');
       showError(panel, message);
+      if (detail) setText(q(panel, 'detail'), detail);
       if (typeof onError === 'function') onError(message, data);
-      return { ok: false, error: message, data };
+      return { ok: false, error: message, data, status: response.status };
     } catch (error) {
       if (timer) clearInterval(timer);
       if (panel) running.delete(panel);

@@ -211,7 +211,8 @@ export function syncPercentFromPages(
   const to = Math.max(from, Number(end) || from);
   if (!fetched) return from;
   if (total > 0) return Math.min(to, from + (fetched / total) * (to - from));
-  return Math.min(to, from + fetched * 0.4);
+  const span = Math.max(1, to - from);
+  return Math.min(to, from + span * (1 - Math.exp(-fetched / 18)));
 }
 
 export default {
