@@ -26,7 +26,7 @@ const STATE_MAP = {
 
 const STATE_LABEL = {
   complete: 'Lengkap',
-  process: 'Proses',
+  process: 'Menunggu approval',
   missing: 'Belum ada',
 };
 
@@ -41,6 +41,20 @@ function safeText(value) {
 
 function cleanOneLine(value) {
   return safeText(value).replace(/\s+/g, ' ').trim();
+}
+
+/** Kode akses Portal Jamaah dari field langsung atau tautan portal. */
+function portalAccessCode(row = {}) {
+  const direct = cleanOneLine(
+    row.portalCode || row.portal_code || row.accessCode || row.uniqueCode,
+  )
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  if (direct) return direct;
+
+  const url = safeText(row.portalUrl || row.portal_url || '');
+  const match = url.match(/[?&](?:unique_code|uniq_code)=([A-Za-z0-9]+)/i);
+  return cleanOneLine(match?.[1] || '').toUpperCase();
 }
 
 function normalizeText(value) {
@@ -125,7 +139,11 @@ export function parseDokumenDetail(detail = '') {
  */
 export function summarizeDocuments(row = {}) {
   const documents = parseDokumenDetail(row?.dokumenDetail);
-  const completed = documents.filter((doc) => doc.state === 'complete').length;
+  // Status SGO "PROSES" berarti berkas sudah diunggah dan sedang menunggu
+  // approval. Dokumen seperti ini tidak boleh dihitung Missing.
+  const completed = documents.filter(
+    (doc) => doc.state === 'complete' || doc.state === 'process',
+  ).length;
   const missing = documents
     .filter((doc) => doc.state === 'missing')
     .map((doc) => doc.label);
@@ -153,10 +171,13 @@ export function buildSafeJamaahRow(row = {}, index = 0) {
   const orderCode = getOrderCode(row);
   const paket = cleanOneLine(row.paket);
   const keberangkatan = cleanOneLine(row.keberangkatan);
+  const pemesan = cleanOneLine(row.pemesan) || nama;
 
   return {
     id: getRowId(row, index),
     nama,
+    pemesan,
+    accessCode: portalAccessCode(row),
     orderCode,
     shortCode: getShortCode(row),
     paket,

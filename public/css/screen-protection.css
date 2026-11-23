@@ -1,0 +1,135 @@
+.screen-protection-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  color: rgba(255, 255, 255, 0.82);
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-align: center;
+  padding: 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.screen-protection-overlay.is-active {
+  display: flex;
+}
+
+.screen-protection-overlay__content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.screen-protection-overlay__title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+.screen-protection-overlay__text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.screen-protection-watermark {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  pointer-events: none;
+  overflow: hidden;
+  user-select: none;
+}
+
+.screen-protection-watermark__grid {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 72px 96px;
+  padding: 48px;
+  transform: rotate(-28deg);
+  transform-origin: center;
+}
+
+.screen-protection-watermark__item {
+  width: 320px;
+  flex: 0 0 320px;
+  font-family: "Plus Jakarta Sans", Inter, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.045);
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+body.screen-protection-guard,
+body.screen-protection-guard *:not(input):not(textarea):not(select):not(option):not([contenteditable="true"]):not([contenteditable=""]):not(.screen-protect-allow) {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+body.screen-protection-guard input,
+body.screen-protection-guard textarea,
+body.screen-protection-guard select,
+body.screen-protection-guard option,
+body.screen-protection-guard [contenteditable="true"],
+body.screen-protection-guard [contenteditable=""],
+body.screen-protection-guard .screen-protect-allow {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
+}
+
+body.screen-protection-guard img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  body::before {
+    visibility: visible !important;
+    position: fixed !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 32px !important;
+    background: #fff !important;
+    color: #111 !important;
+    font: 700 20px/1.5 Inter, system-ui, sans-serif !important;
+    text-align: center !important;
+    white-space: pre-line !important;
+    content: "Pencetakan dinonaktifkan\A\AKonten Rahmah Travel AI Console bersifat rahasia dan tidak boleh dicetak, disimpan sebagai PDF, atau didistribusikan tanpa otorisasi." !important;
+    z-index: 2147483647 !important;
+  }
+
+  .screen-protection-overlay,
+  .screen-protection-watermark {
+    display: none !important;
+  }
+}

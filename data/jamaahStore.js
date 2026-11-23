@@ -1,15 +1,25 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  canUseFilesystemPersistence,
+  isReadOnlyFsError,
+  resolveWritablePath,
+} from '../services/runtimeEnv.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// File penyimpanan permanen. Bisa diarahkan lewat env JAMAAH_DATA_FILE.
 const DATA_FILE = process.env.JAMAAH_DATA_FILE
-  ? path.resolve(process.env.JAMAAH_DATA_FILE)
-  : path.join(__dirname, '..', 'jamaah_data.json');
+  ? resolveWritablePath(process.env.JAMAAH_DATA_FILE, 'jamaah_data.json')
+  : canUseFilesystemPersistence()
+    ? path.join(__dirname, '..', 'jamaah_data.json')
+    : resolveWritablePath(
+        path.join(__dirname, '..', 'jamaah_data.json'),
+        'jamaah_data.json',
+      );
 const DATA_FILE_VERSION = 1;
+const persistenceEnabled = !process.env.VERCEL && canUseFilesystemPersistence();
 
 let activeJamaah = [];
 let sourceInfo = null;
@@ -313,313 +323,95 @@ export function getJamaahDataFilePath() {
   return DATA_FILE;
 }
 
-/**
- * Tulis JSON secara atomik: tulis ke file sementara lalu rename.
- * Fallback copy/write langsung dipakai bila Windows mengunci file target.
- */
 function writeJsonAtomic(payload) {
+  if (!persistenceEnabled) return false;
   const dir = path.dirname(DATA_FILE);
-  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    if (isReadOnlyFsError(error)) return false;
+    throw error;
+  }
 
   const json = JSON.stringify(payload, null, 2);
   const tmpFile = `${DATA_FILE}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpFile, json, 'utf8');
-
   try {
-    fs.renameSync(tmpFile, DATA_FILE);
-    return;
-  } catch {
+    fs.writeFileSync(tmpFile, json, 'utf8');
     try {
-      fs.copyFileSync(tmpFile, DATA_FILE);
-      fs.unlinkSync(tmpFile);
-      return;
+      fs.renameSync(tmpFile, DATA_FILE);
+      return true;
     } catch {
-      // Coba tulis langsung sebagai upaya terakhir.
+      try {
+        fs.copyFileSync(tmpFile, DATA_FILE);
+        fs.unlinkSync(tmpFile);
+        return true;
+      } catch {}
     }
-  }
-
-  try {
-    fs.writeFileSync(DATA_FILE, json, 'utf8');
-  } finally {
     try {
-      fs.unlinkSync(tmpFile);
-    } catch {
-      // File sementara mungkin sudah tidak ada.
+      fs.writeFileSync(DATA_FILE, json, 'utf8');
+      return true;
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
     }
+  } catch (error) {
+    if (!isReadOnlyFsError(error)) throw error;
+    try { fs.unlinkSync(tmpFile); } catch {}
+    return false;
   }
 }
 
-/** Simpan data jamaah aktif + info sumber ke file JSON lokal. */
 function persistJamaahData() {
   if (activeJamaah.length === 0) return false;
+  if (!persistenceEnabled) return false;
   try {
-    writeJsonAtomic({
+    return writeJsonAtomic({
       version: DATA_FILE_VERSION,
       savedAt: new Date().toISOString(),
       source: sourceInfo,
-      count: activeJamaah.length,
-      jamaah: activeJamaah,
+      rows: activeJamaah,
     });
-    const nikCount = activeJamaah.filter((j) => j.nik || j.ktp).length;
-    const passportCount = activeJamaah.filter(
-      (j) => j.passport || j.paspor || j.noPaspor,
-    ).length;
-    console.log(
-      `[jamaahStore] Tersimpan permanen: ${activeJamaah.length} jamaah ` +
-        `(NIK ${nikCount}, Paspor ${passportCount}) -> ${DATA_FILE}`,
-    );
-    return true;
-  } catch (error) {
-    console.error(
-      `[jamaahStore] GAGAL menyimpan data ke ${DATA_FILE}: ${error.message}. ` +
-        'Data tetap tersedia di memori; periksa izin tulis folder.',
-    );
+  } catch (err) {
+    if (!isReadOnlyFsError(err)) {
+      console.error('[jamaahStore] Gagal menyimpan ke disk:', err.message);
+    }
     return false;
   }
 }
 
-/**
- * Baca data permanen dari file JSON. Data yang sudah ada di memori tidak
- * ditimpa kecuali dipanggil eksplisit saat store kosong/startup.
- */
-export function loadJamaahDataFromDisk({ reason = 'startup' } = {}) {
+export function loadJamaahDataFromDisk() {
+  if (!persistenceEnabled) return false;
   try {
     if (!fs.existsSync(DATA_FILE)) return false;
-
-    const raw = fs.readFileSync(DATA_FILE, 'utf8').trim();
-    if (!raw) return false;
-
+    const raw = fs.readFileSync(DATA_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     const rows = Array.isArray(parsed)
       ? parsed
-      : Array.isArray(parsed?.jamaah)
-        ? parsed.jamaah
-        : Array.isArray(parsed?.data)
-          ? parsed.data
-          : [];
-    const storedSource =
-      !Array.isArray(parsed) && parsed?.source && typeof parsed.source === 'object'
-        ? parsed.source
-        : null;
-
-    // Tombstone dari clearJamaahData(): file sengaja tidak berisi jamaah.
+      : Array.isArray(parsed?.rows)
+        ? parsed.rows
+        : [];
     if (rows.length === 0) return false;
 
-    const mapped = rows.map(mapRow).filter(Boolean);
-    if (mapped.length === 0) {
-      console.warn(
-        `[jamaahStore] File ${DATA_FILE} tidak berisi baris jamaah valid. Store tetap kosong.`,
-      );
-      return false;
-    }
+    const normalizedRows = rows.map(normalizeJamaahRow).filter(Boolean);
+    if (normalizedRows.length === 0) return false;
 
-    activeJamaah = mapped;
-    sourceInfo = {
-      type: storedSource?.type || 'file',
-      url: storedSource?.url || null,
-      filename: storedSource?.filename || null,
-      modules: storedSource?.modules || null,
-      count: mapped.length,
-      fieldCoverage: {
-        nik: mapped.filter((j) => j.nik || j.ktp).length,
-        passport: mapped.filter((j) => j.passport || j.paspor || j.noPaspor).length,
-        manifestId: mapped.filter((j) => j.manifestId).length,
-      },
-      loadedAt: storedSource?.loadedAt || new Date().toISOString(),
-      savedAt: typeof parsed?.savedAt === 'string' ? parsed.savedAt : null,
-      restoredAt: new Date().toISOString(),
-      storage: 'local-json',
-      dataFile: DATA_FILE,
+    activeJamaah = normalizedRows;
+    sourceInfo = (parsed && !Array.isArray(parsed) && parsed.source) || {
+      type: 'file',
+      loadedAt: parsed?.savedAt || new Date().toISOString(),
+      file: path.basename(DATA_FILE),
+      rowCount: normalizedRows.length,
     };
-    lastEmptyWarningAt = 0;
     console.log(
-      `[jamaahStore] Memuat ${mapped.length} jamaah permanen dari ${DATA_FILE}` +
-        `${reason ? ` (${reason})` : ''}.`,
+      `[jamaahStore] Data jamaah dimuat dari ${path.basename(DATA_FILE)}: ` +
+        `${activeJamaah.length} jamaah (sumber: ${sourceInfo?.type || 'file'}).`,
     );
     return true;
-  } catch (error) {
-    console.error(
-      `[jamaahStore] Gagal membaca ${DATA_FILE}: ${error.message}. ` +
-        'Store tetap kosong; jalankan scrape Monitoring Jamaah bila perlu.',
-    );
+  } catch (err) {
+    if (!isReadOnlyFsError(err)) {
+      console.error('[jamaahStore] Gagal memuat dari disk:', err.message);
+    }
     return false;
   }
-}
-
-/** Lazy-load saat store kosong, mis. data belum terbaca ketika startup. */
-function ensureJamaahDataLoaded(context = '') {
-  if (activeJamaah.length > 0) return false;
-  return loadJamaahDataFromDisk({ reason: context || 'pencarian' });
-}
-
-/** Hapus file permanen; bila gagal, tulis tombstone agar data tidak hidup lagi. */
-function removePersistedJamaahData(reason = 'manual') {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      fs.unlinkSync(DATA_FILE);
-      console.log(`[jamaahStore] File data permanen dihapus: ${DATA_FILE}`);
-    }
-    return true;
-  } catch (error) {
-    console.error(
-      `[jamaahStore] Gagal menghapus ${DATA_FILE}: ${error.message}. ` +
-        'Menulis penanda kosong agar data lama tidak dimuat ulang.',
-    );
-    try {
-      writeJsonAtomic({
-        version: DATA_FILE_VERSION,
-        clearedAt: new Date().toISOString(),
-        reason,
-        count: 0,
-        source: null,
-        jamaah: [],
-      });
-      return true;
-    } catch (writeError) {
-      console.error(
-        `[jamaahStore] Gagal menulis penanda kosong: ${writeError.message}.`,
-      );
-      return false;
-    }
-  }
-}
-
-/**
- * Pertahankan NIK/paspor lama hanya untuk baris yang manifest-nya gagal
- * diambil pada scrape kali ini. Jika manifest berhasil dibaca (manifestFetched
- * true), data terbaru dari SGO yang dipakai — termasuk bila memang kosong.
- */
-function preserveSensitiveFields(mapped = [], previous = []) {
-  if (!mapped.length || !previous.length) return { nik: 0, passport: 0 };
-
-  const index = new Map();
-  const add = (key, row) => {
-    if (key && !index.has(key)) index.set(key, row);
-  };
-
-  for (const prev of previous) {
-    if (!prev) continue;
-    const name = normalize(prev.nama);
-    if (!name) continue;
-    const order = normalize(prev.orderCode || prev.kodeOrder || prev.orderId);
-    const rtb = rtbNumberOf(prev.rtb || prev.noRtb);
-    if (order) add(`o:${order}|${name}`, prev);
-    if (rtb) add(`r:${rtb}|${name}`, prev);
-  }
-
-  let nik = 0;
-  let passport = 0;
-  for (const row of mapped) {
-    if (!row || row.manifestFetched === true) continue;
-    const name = normalize(row.nama);
-    if (!name) continue;
-    const order = normalize(row.orderCode || row.kodeOrder || row.orderId);
-    const rtb = rtbNumberOf(row.rtb || row.noRtb);
-    const prev =
-      (order && index.get(`o:${order}|${name}`)) ||
-      (rtb && index.get(`r:${rtb}|${name}`));
-    if (!prev) continue;
-
-    const prevNik = prev.nik || prev.ktp || prev.noKtp || '';
-    const prevPassport =
-      prev.passport || prev.paspor || prev.noPaspor || prev.nomorPaspor || '';
-    if (!(row.nik || row.ktp) && prevNik) {
-      row.nik = prevNik;
-      row.ktp = prevNik;
-      nik += 1;
-    }
-    if (!(row.passport || row.paspor || row.noPaspor) && prevPassport) {
-      row.passport = prevPassport;
-      row.paspor = prevPassport;
-      row.noPaspor = prevPassport;
-      passport += 1;
-    }
-    if (!row.noHp && prev.noHp) row.noHp = prev.noHp;
-    if (!row.tempatLahir && prev.tempatLahir) row.tempatLahir = prev.tempatLahir;
-    if (!row.tanggalLahir && prev.tanggalLahir) row.tanggalLahir = prev.tanggalLahir;
-    if (!row.kotaPaspor && prev.kotaPaspor) row.kotaPaspor = prev.kotaPaspor;
-    if (!row.tanggalExpiredPaspor && prev.tanggalExpiredPaspor) {
-      row.tanggalExpiredPaspor = prev.tanggalExpiredPaspor;
-    }
-    if (!row.identityType && prev.identityType) row.identityType = prev.identityType;
-  }
-
-  if (nik || passport) {
-    console.log(
-      `[jamaahStore] NIK/paspor lama dipertahankan untuk ${nik} NIK dan ${passport} paspor ` +
-        '(manifest tidak berhasil dibaca pada scrape ini).',
-    );
-  }
-  return { nik, passport };
-}
-
-export function setJamaahData(list = [], info = {}) {
-  if (!Array.isArray(list)) {
-    console.warn(
-      '[jamaahStore] setJamaahData diabaikan: input bukan array. Data lama dipertahankan.',
-    );
-    return getActiveJamaah();
-  }
-
-  const mapped = list.map(mapRow).filter(Boolean);
-
-  // Hasil scrape/upload yang kosong tidak boleh mengosongkan store.
-  // Penghapusan data hanya boleh lewat clearJamaahData() yang eksplisit.
-  if (mapped.length === 0) {
-    if (activeJamaah.length > 0) {
-      console.warn(
-        `[jamaahStore] PERINGATAN: ${list.length} baris tidak menghasilkan data jamaah valid. ` +
-          `Data lama (${activeJamaah.length} jamaah) tetap dipertahankan; store tidak di-reset ke kosong.`,
-      );
-    } else {
-      warnIfJamaahStoreEmpty('setJamaahData tanpa data valid');
-    }
-    return getActiveJamaah();
-  }
-
-  preserveSensitiveFields(mapped, activeJamaah);
-
-  if (info.merge && activeJamaah.length > 0) {
-    const seen = new Set();
-    for (const j of activeJamaah) {
-      const key = (j.orderCode || j.noRtb || j.nama || '').toLowerCase();
-      if (key) seen.add(key);
-    }
-    for (const m of mapped) {
-      const key = (m.orderCode || m.noRtb || m.nama || '').toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      activeJamaah.push(m);
-    }
-  } else {
-    activeJamaah = mapped;
-  }
-
-  // Data valid sudah masuk; izinkan peringatan segera muncul lagi bila store
-  // benar-benar dikosongkan pada request berikutnya.
-  lastEmptyWarningAt = 0;
-
-  sourceInfo = {
-    type: info.type || 'manual',
-    url: info.url || null,
-    filename: info.filename || null,
-    modules: info.modules || sourceInfo?.modules || null,
-    count: activeJamaah.length,
-    fieldCoverage: {
-      nik: activeJamaah.filter((j) => j.nik || j.ktp).length,
-      passport: activeJamaah.filter(
-        (j) => j.passport || j.paspor || j.noPaspor,
-      ).length,
-      manifestId: activeJamaah.filter((j) => j.manifestId).length,
-    },
-    loadedAt: new Date().toISOString(),
-    storage: 'local-json',
-    dataFile: DATA_FILE,
-  };
-
-  // Wajib simpan ke disk setiap scrape/upload sukses agar tahan restart.
-  persistJamaahData();
-  return getActiveJamaah();
 }
 
 export function clearJamaahData(reason = 'manual') {
@@ -640,15 +432,43 @@ export function hasRealJamaahData() {
   return activeJamaah.length > 0;
 }
 
+function ensureJamaahDataLoaded(context = '') {
+  if (activeJamaah.length > 0) return true;
+  return loadJamaahDataFromDisk();
+}
+
+const cleanText = (value = '') => safeString(value).replace(/\s+/g, ' ').trim();
+const digitsOnly = (value = '') => safeString(value).replace(/\D+/g, '');
+const normalizeJamaahRow = (row = {}) => mapRow(row);
+
 export function getActiveJamaah() {
-  // Bila server baru restart atau scrape dijalankan dari proses lain, pastikan
-  // data permanen di jamaah_data.json dibaca sebelum status/daftar dikirim.
   if (!activeJamaah.length) ensureJamaahDataLoaded('getActiveJamaah');
   return activeJamaah.map((j) => ({ ...j }));
 }
 
 export function getJamaahSource() {
   return sourceInfo ? { ...sourceInfo } : null;
+}
+
+/**
+ * Cari satu jamaah berdasarkan ID manifest/jamaah secara persis.
+ * Penggunaan ID eksplisit mencegah data jamaah lain ikut tampil pada halaman
+ * edit dokumen. Kode order tidak dipakai karena satu order bisa berisi
+ * beberapa jamaah.
+ */
+export function findJamaahById(id = '') {
+  const target = String(id || '').trim();
+  if (!target) return null;
+
+  if (!activeJamaah.length) ensureJamaahDataLoaded('findJamaahById');
+
+  const row = activeJamaah.find(
+    (item) =>
+      String(item.manifestId || '').trim() === target ||
+      String(item.jamaahId || '').trim() === target,
+  );
+
+  return row ? { ...row } : null;
 }
 
 const safeString = (val) => {
@@ -1303,6 +1123,110 @@ export function findJamaah(query = '') {
 
 export { safeString, safeLower };
 
+export function setJamaahData(list = [], info = {}) {
+  const rows = Array.isArray(list) ? list.map(normalizeJamaahRow).filter(Boolean) : [];
+  const merge = Boolean(info.merge && activeJamaah.length > 0);
+  const merged = merge ? [...activeJamaah] : [];
+
+  const keyFor = (row) => {
+    const manifestId = cleanText(row.manifestId || row.jamaahId || '');
+    if (manifestId) return `manifest:${manifestId}`;
+    const order = cleanText(row.orderCode || row.kodeOrder || row.orderId || '').toUpperCase();
+    const nik = digitsOnly(row.nik || '');
+    const passport = cleanText(row.passport || row.paspor || row.noPaspor || '').toUpperCase();
+    const name = normalize(row.nama || '');
+    if (order && nik) return `order-nik:${order}:${nik}`;
+    if (order && passport) return `order-passport:${order}:${passport}`;
+    if (order && name) return `order-name:${order}:${name}`;
+    if (nik) return `nik:${nik}`;
+    if (passport) return `passport:${passport}`;
+    if (order) return `order:${order}`;
+    return name ? `name:${name}` : '';
+  };
+
+  const index = new Map();
+  merged.forEach((row, i) => {
+    const key = keyFor(row);
+    if (key) index.set(key, i);
+  });
+
+  rows.forEach((row) => {
+    const key = keyFor(row);
+    if (key && index.has(key)) {
+      merged[index.get(key)] = { ...merged[index.get(key)], ...row };
+      return;
+    }
+    if (key) index.set(key, merged.length);
+    merged.push(row);
+  });
+
+  activeJamaah = merged;
+  sourceInfo = {
+    ...(info && typeof info === 'object' ? info : {}),
+    type: info.type || 'sgo',
+    loadedAt: new Date().toISOString(),
+    count: activeJamaah.length,
+  };
+  persistJamaahData();
+  return activeJamaah;
+}
+
+export function upsertJamaahRows(rows = [], info = {}) {
+  const normalizedRows = Array.isArray(rows) ? rows.map(normalizeJamaahRow).filter(Boolean) : [];
+  const replaceDocuments = Boolean(info.replaceDocuments);
+  const keyFor = (row) => {
+    const manifestId = cleanText(row.manifestId || row.jamaahId || '');
+    if (manifestId) return `manifest:${manifestId}`;
+    const order = cleanText(row.orderCode || row.kodeOrder || row.orderId || '').toUpperCase();
+    const name = normalize(row.nama || '');
+    if (order && name) return `order-name:${order}:${name}`;
+    return '';
+  };
+
+  const index = new Map();
+  activeJamaah.forEach((row, i) => {
+    const key = keyFor(row);
+    if (key) index.set(key, i);
+  });
+
+  let inserted = 0;
+  let updated = 0;
+  let documentsUpdated = 0;
+
+  normalizedRows.forEach((row) => {
+    const key = keyFor(row);
+    if (!key) return;
+    if (index.has(key)) {
+      const current = activeJamaah[index.get(key)] || {};
+      const next = { ...current, ...row };
+      if (!replaceDocuments) {
+        if (!next.dokumenDetail && current.dokumenDetail) next.dokumenDetail = current.dokumenDetail;
+        if (!next.statusDokumen && current.statusDokumen) next.statusDokumen = current.statusDokumen;
+      } else if (
+        String(next.dokumenDetail || '') !== String(current.dokumenDetail || '') ||
+        String(next.statusDokumen || '') !== String(current.statusDokumen || '')
+      ) {
+        documentsUpdated += 1;
+      }
+      activeJamaah[index.get(key)] = next;
+      updated += 1;
+      return;
+    }
+    index.set(key, activeJamaah.length);
+    activeJamaah.push(row);
+    inserted += 1;
+  });
+
+  sourceInfo = {
+    ...(sourceInfo && typeof sourceInfo === 'object' ? sourceInfo : {}),
+    ...(info && typeof info === 'object' ? info : {}),
+    loadedAt: new Date().toISOString(),
+    count: activeJamaah.length,
+  };
+  persistJamaahData();
+  return { inserted, updated, documentsUpdated, total: activeJamaah.length };
+}
+
 export function formatJamaahDetail(j = {}) {
   const lines = [];
   if (j.orderCode || j.kodeOrder || j.orderId) lines.push(`Kode Order: ${j.orderCode || j.kodeOrder || j.orderId}${j.shortCode ? ` (Short: ${j.shortCode})` : ''}`);
@@ -1353,11 +1277,9 @@ export function getJamaahData() {
 }
 
 export function getAllJamaah() {
-  // Tidak ada fallback mock. Store kosong berarti daftar jamaah kosong.
   return getActiveJamaah();
 }
 
-// Muat data permanen begitu modul diimpor (server start/restart).
-loadJamaahDataFromDisk({ reason: 'startup' });
+loadJamaahDataFromDisk();
 
-export default { setJamaahData, clearJamaahData, hasRealJamaahData, getActiveJamaah, getJamaahData, getJamaahSource, findJamaah, hasJamaahNameMatch, hasJamaahPackageMatch, hasJamaahPassportMatch, hasJamaahRtbMatch, formatJamaahDetail, getAllJamaah, extractOrderShortCode, getOrderAliases, loadJamaahDataFromDisk, getJamaahDataFilePath };
+export default { setJamaahData, upsertJamaahRows, clearJamaahData, hasRealJamaahData, getActiveJamaah, getJamaahData, getJamaahSource, findJamaah, hasJamaahNameMatch, hasJamaahPackageMatch, hasJamaahPassportMatch, hasJamaahRtbMatch, formatJamaahDetail, getAllJamaah, extractOrderShortCode, getOrderAliases, loadJamaahDataFromDisk, getJamaahDataFilePath };

@@ -3,19 +3,22 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+import { createDatabaseSync } from './sqliteCompat.js';
 import * as cheerio from 'cheerio';
 import {
   SGO_BROWSER_HEADERS,
 } from './sgoScraper.js';
 import { getRequestSgoCookieHeader } from './sgoRequestContext.js';
+import { isReadOnlyFsError, resolveWritablePath } from './runtimeEnv.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH =
-  process.env.WORKSHEET_DB_PATH || path.join(DATA_DIR, 'worksheet.sqlite');
+const DB_PATH = resolveWritablePath(
+  process.env.WORKSHEET_DB_PATH || path.join(DATA_DIR, 'worksheet.sqlite'),
+  'worksheet.sqlite',
+);
 const CACHE_TTL_MS = Math.max(
   30_000,
   Number(process.env.WORKSHEET_CACHE_TTL_MS || 3 * 60 * 1000) || 3 * 60 * 1000,
@@ -515,11 +518,23 @@ function ensureWorksheetColumns(database) {
 function getDb() {
   if (db) return db;
 
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  db = new DatabaseSync(DB_PATH);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA busy_timeout = 5000;');
-  db.exec('PRAGMA synchronous = NORMAL;');
+  try {
+    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    db = createDatabaseSync(DB_PATH);
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA busy_timeout = 5000;');
+    db.exec('PRAGMA synchronous = NORMAL;');
+  } catch (error) {
+    try {
+      db = createDatabaseSync(':memory:');
+      db.exec('PRAGMA busy_timeout = 5000;');
+    } catch (memoryError) {
+      throw memoryError;
+    }
+    if (!isReadOnlyFsError(error)) {
+      console.warn('[worksheet] SQLite file tidak tersedia, memakai memori:', error.message);
+    }
+  }
 
   if (!schemaReady) {
     createSchema(db);

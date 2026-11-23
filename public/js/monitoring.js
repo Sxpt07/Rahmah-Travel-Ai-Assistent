@@ -14,6 +14,7 @@
     syncDot: document.getElementById('monitoring-sync-dot'),
     syncLabel: document.getElementById('monitoring-sync-label'),
     refresh: document.getElementById('monitoring-refresh'),
+    progress: document.getElementById('monitoring-sync-progress'),
   };
 
   let loaded = false;
@@ -148,8 +149,51 @@
     if (!loaded) load();
   }
 
-  function refresh() {
-    return load({ force: true });
+  /**
+   * Refresh ringkasan sekaligus menjalankan sinkronisasi SGO live.
+   * Progress bar membaca status nyata dari server, bukan animasi palsu.
+   */
+  async function refresh() {
+    if (loading) return null;
+
+    const result = await window.SgoSync.run({
+      panel: els.progress,
+      button: els.refresh,
+      endpoint: '/api/jamaah/scrape-cookie',
+      body: {
+        focusModule: '/ops/monitoring-jamaah',
+        skipManifest: true,
+        js: true,
+      },
+      label: 'Monitoring Jamaah',
+      busyLabel: 'Menyinkronkan...',
+    });
+
+    if (!result.ok) {
+      if (!result.busy) {
+        setChip('Sinkronisasi gagal', 'offline');
+        toast('Error', result.error || 'Sinkronisasi Monitoring Jamaah gagal.', 'error');
+      }
+      return result;
+    }
+
+    loaded = false;
+    await load({ force: true });
+    toast(
+      'Success',
+      result.data?.message || 'Sinkronisasi Monitoring Jamaah selesai.',
+      'success',
+    );
+    document.dispatchEvent(
+      new CustomEvent('umrah:data-updated', {
+        detail: {
+          source: 'monitoring-sync',
+          count: Number(result.data?.count || 0),
+          module: '/ops/monitoring-jamaah',
+        },
+      }),
+    );
+    return result;
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -169,8 +213,9 @@
       if (event.detail?.view === 'monitoring') onShow();
     });
 
-    document.addEventListener('umrah:data-updated', () => {
+    document.addEventListener('umrah:data-updated', (event) => {
       loaded = false;
+      if (event.detail?.source === 'monitoring-sync') return;
       onShow();
     });
 

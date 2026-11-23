@@ -16,6 +16,21 @@
       label: 'Upload Manifest & Cek Dokumen',
       title: 'Upload Manifest & Cek Dokumen • Rahmah Travel AI Console',
     },
+    '/ops/worksheet-perlengkapan': {
+      view: 'worksheet',
+      label: 'Worksheet Perlengkapan',
+      title: 'Worksheet Perlengkapan • Rahmah Travel AI Console',
+    },
+    '/ops/fu-pelunasan': {
+      view: 'fu-pelunasan',
+      label: 'FU Pelunasan',
+      title: 'FU Pelunasan • Rahmah Travel AI Console',
+    },
+    '/ops/add-on': {
+      view: 'add-on',
+      label: 'Add-on Per Batch',
+      title: 'Add-on Per Batch • Rahmah Travel AI Console',
+    },
   };
 
   const DEFAULT_PATH = '/ops/monitoring-jamaah';
@@ -58,6 +73,17 @@
     syncTopSwitch(resolvedPath);
     document.body.dataset.activeView = meta.view;
     document.title = meta.title;
+
+    // Jaga deep link modul tetap akurat saat berpindah tab tanpa reload.
+    if (MODULE_VIEWS[window.location.pathname]) {
+      try {
+        if (window.location.pathname !== resolvedPath) {
+          window.history.replaceState(null, '', resolvedPath);
+        }
+      } catch {
+        /* history hanya pelengkap; tampilan tetap berjalan */
+      }
+    }
 
     if (activeSection) {
       activeSection.scrollTop = 0;
@@ -118,7 +144,12 @@
     });
 
     const select = document.getElementById('moduleSelect');
-    activateView(select?.value || DEFAULT_PATH);
+    // Pathname menang atas nilai select awal: app.js baru menyinkronkan
+    // select dari URL setelah listener ini berjalan.
+    const initialPath = MODULE_VIEWS[window.location.pathname]
+      ? window.location.pathname
+      : select?.value || DEFAULT_PATH;
+    activateView(initialPath);
   });
 
   window.TabController = {

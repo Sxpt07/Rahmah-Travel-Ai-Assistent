@@ -20,20 +20,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+import { createDatabaseSync } from './sqliteCompat.js';
 import * as cheerio from 'cheerio';
 import {
   SGO_BROWSER_HEADERS,
 } from './sgoScraper.js';
 import { getRequestSgoCookieHeader } from './sgoRequestContext.js';
 import { getAllJamaah } from '../data/jamaahStore.js';
+import { isReadOnlyFsError, resolveWritablePath } from './runtimeEnv.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH =
-  process.env.ADDON_DB_PATH || path.join(DATA_DIR, 'addon_per_batch.sqlite');
+const DB_PATH = resolveWritablePath(
+  process.env.ADDON_DB_PATH || path.join(DATA_DIR, 'addon_per_batch.sqlite'),
+  'addon_per_batch.sqlite',
+);
 const SGO_BASE_URL = String(
   process.env.SGO_BASE_URL || 'https://sgo.rahmahgrup.id',
 ).replace(/\/+$/, '');
@@ -378,11 +381,19 @@ function createSchema(database) {
 
 function getDb() {
   if (db) return db;
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  db = new DatabaseSync(DB_PATH);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA busy_timeout = 8000;');
-  db.exec('PRAGMA synchronous = NORMAL;');
+  try {
+    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    db = createDatabaseSync(DB_PATH);
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA busy_timeout = 8000;');
+    db.exec('PRAGMA synchronous = NORMAL;');
+  } catch (error) {
+    db = createDatabaseSync(':memory:');
+    db.exec('PRAGMA busy_timeout = 8000;');
+    if (!isReadOnlyFsError(error)) {
+      console.warn('[addon] SQLite file tidak tersedia, memakai memori:', error.message);
+    }
+  }
   if (!schemaReady) {
     createSchema(db);
     schemaReady = true;

@@ -3,6 +3,7 @@
     "server.js",
     "services",
     "data",
+    "routes",
     "public"
   ],
   "ext": "js,mjs,cjs",
@@ -10,6 +11,8 @@
     "jamaah_data.json",
     "jamaah_data*.json",
     "data/*.json",
+    "data/*.sqlite",
+    "data/*.sqlite-*",
     "sgo_raw",
     "sgo_raw/**",
     "*.tmp"

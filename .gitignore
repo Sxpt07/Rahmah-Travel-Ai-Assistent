@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Secrets & local environment
+.env
+.env.*
+!.env.example
+
+# Jamaah PII / persisted scrape data
+jamaah_data.json
+jamaah_data*.json
+sgo_raw/
+data/*.sqlite
+data/*.sqlite-*
+*.tmp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build & test artifacts
+coverage/
+dist/
+build/
+*.orig
+*.bak
+*.db
+.env.local
+.env.production
+.env.development
+cookies*.json
+*session*.json

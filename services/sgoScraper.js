@@ -5,7 +5,14 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as cheerio from 'cheerio';
-import puppeteer from 'puppeteer';
+let puppeteerModulePromise = null;
+
+async function loadPuppeteer() {
+  if (!puppeteerModulePromise) {
+    puppeteerModulePromise = import('puppeteer').then((module) => module.default || module);
+  }
+  return puppeteerModulePromise;
+}
 import {
   isPersistedSgoModule,
   saveSgoRawError,
@@ -2738,6 +2745,16 @@ export async function scrapeSgoWithBrowser({ url, cookie, focusModule } = {}) {
 
   let browser;
   try {
+    let puppeteer;
+    try {
+      puppeteer = await loadPuppeteer();
+    } catch (error) {
+      throw buildError(
+        'Browser fallback Puppeteer tidak tersedia di environment ini. Pastikan Cookie SGO perangkat valid untuk sinkronisasi fetch.',
+        'SGO_BROWSER_UNAVAILABLE',
+        { cause: error?.message || String(error) },
+      );
+    }
     browser = await puppeteer.launch({
       headless: 'new',
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],

@@ -1,20 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  canUseFilesystemPersistence,
+  getRuntimeTempDir,
+  isReadOnlyFsError,
+} from '../services/runtimeEnv.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/**
- * Penyimpanan respons mentah SGO.
- *
- * Hanya lima modul operasional yang diminta yang dipersistensikan. File berisi
- * HTML asli dari SGO, sehingga tidak boleh di-commit dan tidak boleh dicetak
- * ke log karena dapat memuat data pribadi jamaah.
- */
+const DEFAULT_RAW_DIR = path.join(__dirname, '..', 'sgo_raw');
 const RAW_DIR = process.env.SGO_RAW_DIR
   ? path.resolve(process.env.SGO_RAW_DIR)
-  : path.join(__dirname, '..', 'sgo_raw');
+  : canUseFilesystemPersistence()
+    ? DEFAULT_RAW_DIR
+    : path.join(getRuntimeTempDir(), 'sgo_raw');
+const persistenceEnabled = !process.env.VERCEL && canUseFilesystemPersistence();
 
 export const SGO_RAW_MODULES = Object.freeze([
   '/ops/monitoring-jamaah',
@@ -71,22 +73,26 @@ function readRecord(modulePath = '') {
   if (!normalized) return null;
   if (memory.has(normalized)) return memory.get(normalized);
 
-  const file = rawFilePath(normalized);
-  try {
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const record = {
-        ...emptyRecord(normalized),
-        ...parsed,
-        modulePath: normalized,
-      };
-      memory.set(normalized, record);
-      return record;
+  if (persistenceEnabled) {
+    const file = rawFilePath(normalized);
+    try {
+      if (fs.existsSync(file)) {
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const record = {
+          ...emptyRecord(normalized),
+          ...parsed,
+          modulePath: normalized,
+        };
+        memory.set(normalized, record);
+        return record;
+      }
+    } catch (error) {
+      if (!isReadOnlyFsError(error)) {
+        console.warn(
+          `[sgoRawStore] Gagal membaca ${file}: ${error.message}. Respons mentah dianggap belum ada.`,
+        );
+      }
     }
-  } catch (error) {
-    console.warn(
-      `[sgoRawStore] Gagal membaca ${file}: ${error.message}. Respons mentah dianggap belum ada.`,
-    );
   }
 
   const record = emptyRecord(normalized);
@@ -95,31 +101,39 @@ function readRecord(modulePath = '') {
 }
 
 function writeRecord(record) {
-  fs.mkdirSync(RAW_DIR, { recursive: true });
-  const file = rawFilePath(record.modulePath);
-  const json = JSON.stringify(record, null, 2);
-  const tmpFile = `${file}.${process.pid}.${Date.now()}.tmp`;
-
-  fs.writeFileSync(tmpFile, json, 'utf8');
+  if (!persistenceEnabled) return null;
   try {
-    fs.renameSync(tmpFile, file);
-  } catch {
+    fs.mkdirSync(RAW_DIR, { recursive: true });
+    const file = rawFilePath(record.modulePath);
+    const json = JSON.stringify(record, null, 2);
+    const tmpFile = `${file}.${process.pid}.${Date.now()}.tmp`;
+
+    fs.writeFileSync(tmpFile, json, 'utf8');
     try {
-      fs.copyFileSync(tmpFile, file);
-      fs.unlinkSync(tmpFile);
+      fs.renameSync(tmpFile, file);
     } catch {
       try {
-        fs.writeFileSync(file, json, 'utf8');
-      } finally {
+        fs.copyFileSync(tmpFile, file);
+        fs.unlinkSync(tmpFile);
+      } catch {
         try {
-          fs.unlinkSync(tmpFile);
-        } catch {
-          // File sementara mungkin sudah tidak ada.
+          fs.writeFileSync(file, json, 'utf8');
+        } finally {
+          try {
+            fs.unlinkSync(tmpFile);
+          } catch {}
         }
       }
     }
+    return file;
+  } catch (error) {
+    if (!isReadOnlyFsError(error)) {
+      console.warn(
+        `[sgoRawStore] Gagal menulis respons ${record.modulePath}: ${error.message}.`,
+      );
+    }
+    return null;
   }
-  return file;
 }
 
 function responseMeta(record) {

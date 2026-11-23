@@ -3,10 +3,11 @@
 Express.js backend for an AI-powered Umrah & Hajj travel assistant. It can:
 
 1. **Index an agency website** (`/api/index-url`) — scrapes packages, facilities, prices, and FAQs into clean AI context.
-2. **Chat** (`/api/chat`) — intent-aware replies: sapaan/obrolan/keluhan/FAQ dijawab Gemini `gemini-2.0-flash`, sedangkan pencarian jamaah dijalankan lokal dari data SGO.
+2. **Chat** (`/api/chat`) — intent-aware replies: sapaan/obrolan/keluhan/FAQ dijawab Gemini (`GEMINI_MODEL` + fallback), sedangkan pencarian jamaah dijalankan lokal dari data SGO.
 3. **Real-time SGO scraping** (`/api/jamaah/scrape-cookie`, `/api/jamaah/fetch-env`) — HTTP request langsung ke `https://sgo.rahmahgrup.id` memakai `SGO_ADMIN_SESSION`, untuk satu modul atau seluruh 16 modul.
 4. **Raw response persistence** — HTML asli dari lima modul operasional disimpan ke `sgo_raw/` dan bisa dicek metadatanya lewat `GET /api/sgo/responses`.
 5. **No mock data** — bila belum ada hasil scrape atau SGO gagal diakses, response berisi `count: 0` dan daftar kosong. `/api/seats` juga kosong sampai sumber seat real terhubung.
+6. **Rapihin Kata (Rahmah Style)** (`POST /api/message/rapihin`) — menghaluskan draf FU dokumen, FU pelunasan, dan balasan chat operasional. Fakta penting (nama, kode order, nominal, tautan, daftar dokumen) divalidasi; bila Gemini tidak tersedia atau menghilangkan fakta, teks memakai perapi lokal yang aman.
 
 > **Location:** this backend lives in `umrah-ai-backend/` so it does not overwrite the existing Electron app in the parent folder.
 
@@ -162,6 +163,7 @@ Endpoint yang tersedia:
 - `GET /api/sgo/modules` — daftar 16 modul beserta label dan `jamaahSource`.
 - `GET /api/sgo/responses` — metadata respons mentah SGO per modul (tanpa HTML/PII).
 - `POST /api/chat` - klasifikasi intent: sapaan/obrolan/keluhan/FAQ ke Gemini, pencarian jamaah lokal case-insensitive (nama / NIK / paspor / kode order full-parsial / RTB), hasil kosong dijawab ramah.
+- `POST /api/message/rapihin` — Rapihin Kata (Rahmah Style): haluskan draf FU atau balasan chat, validasi fakta penting, fallback lokal bila Gemini tidak tersedia.
 
 Restart the server after changing `.env`.
 
@@ -283,6 +285,44 @@ curl.exe -X POST http://localhost:3000/api/chat `
 Nilai `source` yang mungkin: `jamaah-data`, `gemini`, `local-fallback`,
 `local`, atau `error`. Field `intent`, `source`, `usedJamaahLookup`,
 `matchedCount`, dan `latencyMs` dipakai UI untuk menampilkan badge jawaban.
+
+---
+
+### `POST /api/message/rapihin`
+
+Rapihin Kata (Rahmah Style) untuk draf pesan layanan pelanggan. Dipakai tombol
+**Rapihin Kata** di kartu FU dokumen, FU Pelunasan, dan balasan chat. Hasil
+selalu bisa diedit di modal sebelum disalin.
+
+**Body**
+
+```json
+{
+  "text": "Draf pesan yang ingin dirapikan",
+  "mode": "fu",
+  "facts": ["Nama Jamaah", "ORD-2026-UMR-0042", "KTP", "Paspor"]
+}
+```
+
+- `mode`: `fu` (follow-up dokumen/pembayaran) atau `chat` (balasan operasional).
+- `facts`: fakta tambahan yang wajib tetap ada di hasil akhir (opsional).
+- `text`: maksimal 6.000 karakter.
+
+**Response**
+
+```json
+{
+  "success": true,
+  "text": "Assalamu'alaikum ...",
+  "source": "gemini",
+  "model": "gemini-3.6-flash",
+  "reason": ""
+}
+```
+
+`source` bernilai `gemini` bila hasil AI lolos validasi fakta, atau
+`local-fallback` bila AI tidak aktif, timeout, atau ada fakta yang hilang.
+UI juga merapikan secara lokal di browser bila endpoint tidak dapat dihubungi.
 
 ---
 
@@ -585,6 +625,7 @@ POST /api/chat
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Model Gemini utama (dibaca dari `.env`) |
 | `GEMINI_FALLBACK_MODEL` | `gemini-3.8-flash,gemini-flash-latest` | Daftar model cadangan, dipisah koma |
 | `GEMINI_TIMEOUT_MS` | `6000` | Timeout request Gemini (dibatasi 1–`10000` ms) |
+| `GEMINI_POLISH_TIMEOUT_MS` | `25000` | Timeout Rapihin Kata (dibatasi 4–`45000` ms) |
 | `SGO_BASE_URL` | — | Base URL SGO Admin |
 | `SGO_ADMIN_SESSION` | — | Cookie sesi admin SGO |
 | `JAMAAH_DATA_FILE` | `jamaah_data.json` (root backend) | Lokasi file penyimpanan permanen hasil scrape |
@@ -597,6 +638,8 @@ POST /api/chat
 | `SGO_MANIFEST_CONCURRENCY` | `8` | Jumlah manifest jamaah yang di-fetch paralel (1–20) |
 | `SGO_MANIFEST_TIMEOUT_MS` | `20000` | Timeout per halaman manifest (5–60 detik) |
 | `SGO_MANIFEST_CACHE_MS` | `300000` | Cache in-memory NIK/paspor per manifest (5 menit) |
+| `SGO_MANIFEST_RETRY_MAX` | `300` | Maksimum manifest gagal yang dicoba ulang di pass kedua (1–3500) |
+| `SGO_MANIFEST_RETRY_CONCURRENCY` | `2` | Concurrency pass retry manifest (1–10) |
 | `SCRAPER_MAX_CHARS` | `30000` | Context size cap |
 | `SCRAPER_TIMEOUT_MS` | `20000` | Website fetch timeout |
 
@@ -631,7 +674,7 @@ kembalikan `seats: []` dan pesan error; jangan mengisi dengan data contoh.
 
 - Hasil scrape jamaah disimpan permanen di `jamaah_data.json` dan dipulihkan saat restart. Web context lain masih **in-memory**; untuk multi-instance gunakan Redis/Postgres.
 - Respons mentah lima modul SGO disimpan di `sgo_raw/` dan dimuat ulang saat dibutuhkan. Folder ini **wajib di-ignore** dan dibatasi aksesnya.
-- Scrape penuh Monitoring Jamaah menambah satu request manifest per jamaah (±400 request). Atur `SGO_MANIFEST_CONCURRENCY`, `SGO_MANIFEST_TIMEOUT_MS`, dan `SGO_MANIFEST_CACHE_MS` bila server SGO membatasi trafik.
+- Scrape penuh Monitoring Jamaah menambah satu request manifest per jamaah (±400 request). Atur `SGO_MANIFEST_CONCURRENCY`, `SGO_MANIFEST_TIMEOUT_MS`, dan `SGO_MANIFEST_CACHE_MS` bila server SGO membatasi trafik. Manifest yang gagal otomatis dicoba ulang satu pass dengan concurrency lebih rendah dan backoff (lihat `SGO_MANIFEST_RETRY_MAX` dan `SGO_MANIFEST_RETRY_CONCURRENCY`); detail kegagalan akhir tersedia di `manifest.failures` pada respons sync.
 - Pagination Monitoring Jamaah menambah request halaman berurutan (`?page=2`, `?page=3`, dst.). Atur `SGO_PAGINATION_DELAY_MS` (default 500 ms) dan `SGO_PAGINATION_MAX_PAGES` bila server SGO membatasi trafik atau jumlah halaman bertambah.
 - `jamaah_data.json` dan `sgo_raw/*.json` berisi data pribadi jamaah. Jangan di-commit, batasi akses folder, dan terapkan retensi/penghapusan sesuai kebijakan privasi.
 - Add authentication/rate limiting before exposing publicly; CORS is currently open.

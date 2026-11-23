@@ -1,0 +1,1113 @@
+/* --------------------------------------------------------------------------
+   Upload Manifest — FU dokumen per bulan keberangkatan
+   -------------------------------------------------------------------------- */
+
+#manifest-month-shell {
+  position: relative;
+  display: inline-flex;
+  min-height: 2.15rem;
+  min-width: 12.5rem;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.78rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd5e1;
+  transition: border-color 0.18s ease, background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+#manifest-month-shell:hover {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+#manifest-month-shell:focus-within {
+  border-color: rgba(245, 158, 11, 0.48);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.08);
+}
+
+#manifest-month-shell > .manifest-month-icon {
+  pointer-events: none;
+  position: absolute;
+  left: 0.62rem;
+  width: 0.82rem;
+  height: 0.82rem;
+  color: #8b93a0;
+}
+
+#manifest-month {
+  width: 100%;
+  min-height: 2.1rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  padding: 0.35rem 1.9rem 0.35rem 1.86rem;
+  color: #dbe0e7;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  outline: none;
+}
+
+#manifest-month option {
+  background: #15171d;
+  color: #e5e7eb;
+}
+
+#manifest-month-shell > .manifest-month-chevron {
+  pointer-events: none;
+  position: absolute;
+  right: 0.58rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  color: #6b7280;
+}
+
+.manifest-filter-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: #6f7681;
+  font-size: 0.58rem;
+}
+
+/* Container daftar berubah dari satu panel menjadi grid kartu. */
+#manifest-list.manifest-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.78rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
+}
+
+.manifest-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.78rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.012) 58%),
+    #101115;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.18s ease, transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.manifest-card a {
+  -webkit-user-drag: none;
+}
+
+.manifest-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  border-radius: 0.95rem 0 0 0.95rem;
+  background: linear-gradient(
+    180deg,
+    rgba(248, 113, 113, 0),
+    rgba(248, 113, 113, 0.6),
+    rgba(248, 113, 113, 0)
+  );
+  opacity: 0.7;
+}
+
+.manifest-card.is-complete::before {
+  background: linear-gradient(
+    180deg,
+    rgba(52, 211, 153, 0),
+    rgba(52, 211, 153, 0.6),
+    rgba(52, 211, 153, 0)
+  );
+}
+
+.manifest-card:hover {
+  border-color: rgba(245, 158, 11, 0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 16px 38px -30px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* --------------------------------------------------------------------------
+   Kartu order — satu kartu untuk semua jamaah dengan kode order yang sama.
+   -------------------------------------------------------------------------- */
+
+.manifest-order {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.68rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.008) 60%),
+    #0d0e12;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.manifest-order::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  border-radius: 1rem 0 0 1rem;
+  background: linear-gradient(
+    180deg,
+    rgba(248, 113, 113, 0),
+    rgba(248, 113, 113, 0.55),
+    rgba(248, 113, 113, 0)
+  );
+  opacity: 0.7;
+}
+
+.manifest-order.is-complete::before {
+  background: linear-gradient(
+    180deg,
+    rgba(52, 211, 153, 0),
+    rgba(52, 211, 153, 0.5),
+    rgba(52, 211, 153, 0)
+  );
+}
+
+.manifest-order:hover {
+  border-color: rgba(245, 158, 11, 0.18);
+  box-shadow: 0 16px 38px -32px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.manifest-order a {
+  -webkit-user-drag: none;
+}
+
+.manifest-order__head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.manifest-order__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.58rem;
+}
+
+.manifest-order__avatar {
+  display: inline-flex;
+  width: 2.05rem;
+  height: 2.05rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 0.62rem;
+  background: linear-gradient(
+    150deg,
+    rgba(245, 158, 11, 0.18),
+    rgba(255, 255, 255, 0.035)
+  );
+  color: #fcd89a;
+}
+
+.manifest-order__avatar svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.manifest-order.is-complete .manifest-order__avatar {
+  border-color: rgba(52, 211, 153, 0.22);
+  background: linear-gradient(
+    150deg,
+    rgba(52, 211, 153, 0.15),
+    rgba(255, 255, 255, 0.03)
+  );
+  color: #a7f3d0;
+}
+
+.manifest-order__titles {
+  min-width: 0;
+}
+
+.manifest-order__title-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.26rem 0.42rem;
+}
+
+.manifest-order__code {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #f5f6f8;
+  font-size: 0.84rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+}
+
+.manifest-order__code.is-empty {
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.manifest-order__count {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 0.1rem 0.38rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #b6bdc7;
+  font-size: 0.51rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.manifest-order__package {
+  margin-top: 0.18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #7d8490;
+  font-size: 0.61rem;
+}
+
+.manifest-order__context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.28rem 0.8rem;
+  color: #7d8490;
+  font-size: 0.6rem;
+}
+
+.manifest-order__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.36rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 0.62rem;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.manifest-order__summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #6f7681;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.manifest-order__summary-tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.44rem;
+  text-transform: none;
+}
+
+.manifest-order__docs-count {
+  color: #9aa1ac;
+  font-size: 0.57rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.manifest-order__copy-all {
+  display: inline-flex;
+  min-height: 1.72rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  padding: 0.32rem 0.58rem;
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 0.45rem;
+  background: linear-gradient(180deg, #f5b545, #e9a11a);
+  color: #201303;
+  font: inherit;
+  font-size: 0.56rem;
+  font-weight: 750;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 6px 16px -12px rgba(245, 158, 11, 0.85);
+  transition: filter 0.16s ease, transform 0.16s ease, background 0.16s ease,
+    border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.manifest-order__copy-all svg {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.manifest-order__copy-all:hover:not(:disabled) {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+}
+
+.manifest-order__copy-all:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.manifest-order__copy-all:focus-visible {
+  outline: 2px solid rgba(245, 158, 11, 0.65);
+  outline-offset: 2px;
+}
+
+.manifest-order__copy-all:disabled {
+  cursor: progress;
+  opacity: 0.8;
+}
+
+.manifest-order__copy-all.is-copied,
+.manifest-order__copy-all.is-copied:disabled {
+  border-color: rgba(52, 211, 153, 0.38);
+  background: rgba(52, 211, 153, 0.14);
+  color: #6ee7b7;
+  opacity: 1;
+  box-shadow: none;
+  transform: none;
+}
+
+.manifest-order__jamaah-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.46rem;
+}
+
+.manifest-jamaah {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.52rem;
+  padding: 0.62rem 0.68rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.016);
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.manifest-jamaah:hover {
+  border-color: rgba(245, 158, 11, 0.16);
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.manifest-jamaah.is-complete {
+  border-color: rgba(52, 211, 153, 0.1);
+}
+
+.manifest-jamaah__head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.manifest-jamaah__sub {
+  margin-top: 0.16rem;
+  color: #7d8490;
+  font-size: 0.58rem;
+  line-height: 1.3;
+}
+
+.manifest-jamaah__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.42rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.manifest-jamaah .manifest-card__avatar {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.58rem;
+  font-size: 0.6rem;
+}
+
+.manifest-jamaah .manifest-card__name {
+  font-size: 0.76rem;
+}
+
+.manifest-jamaah .manifest-phone-copy {
+  padding: 0.38rem 0.5rem;
+}
+
+.manifest-jamaah .manifest-doc-grid {
+  margin-top: 0.32rem;
+}
+
+.manifest-jamaah .manifest-docs__head {
+  font-size: 0.53rem;
+}
+
+.manifest-jamaah .manifest-docs__count {
+  font-size: 0.54rem;
+}
+
+.manifest-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.manifest-card__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.64rem;
+}
+
+.manifest-card__avatar {
+  display: inline-flex;
+  width: 2.2rem;
+  height: 2.2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 0.68rem;
+  background: linear-gradient(
+    150deg,
+    rgba(245, 158, 11, 0.17),
+    rgba(255, 255, 255, 0.035)
+  );
+  color: #fcd89a;
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.manifest-card.is-complete .manifest-card__avatar {
+  border-color: rgba(52, 211, 153, 0.2);
+  background: linear-gradient(
+    150deg,
+    rgba(52, 211, 153, 0.14),
+    rgba(255, 255, 255, 0.03)
+  );
+  color: #a7f3d0;
+}
+
+.manifest-card__titles {
+  min-width: 0;
+}
+
+.manifest-card__name-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.45rem;
+}
+
+.manifest-card__name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f3f4f6;
+  font-size: 0.83rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.manifest-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.38rem;
+  border-radius: 999px;
+  font-size: 0.51rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.manifest-badge.is-incomplete {
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+}
+
+.manifest-badge.is-complete {
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  background: rgba(52, 211, 153, 0.08);
+  color: #6ee7b7;
+}
+
+.manifest-badge.is-process {
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fcd34d;
+}
+
+.manifest-card__order {
+  margin-top: 0.24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #7d8490;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.manifest-card__rtb {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.22rem;
+  padding: 0.16rem 0.46rem;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #e9b75c;
+  font-size: 0.56rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.manifest-card__rtb.is-empty {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  color: #6f7681;
+}
+
+.manifest-card__context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.8rem;
+  color: #7d8490;
+  font-size: 0.61rem;
+}
+
+.manifest-context-item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.manifest-context-item svg {
+  width: 0.72rem;
+  height: 0.72rem;
+  flex-shrink: 0;
+  color: #656c78;
+}
+
+.manifest-context-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b7bec8;
+  font-weight: 600;
+}
+
+.manifest-phone-copy {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 0.46rem;
+  padding: 0.46rem 0.58rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0.68rem;
+  background: rgba(255, 255, 255, 0.025);
+  color: #a7aeb9;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.manifest-phone-copy.is-copied {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.07);
+  color: #a7f3d0;
+}
+
+.manifest-phone-copy.is-empty {
+  cursor: default;
+}
+
+.manifest-phone-copy.is-empty:hover {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+  color: #a7aeb9;
+}
+
+.manifest-phone-copy > svg {
+  width: 0.82rem;
+  height: 0.82rem;
+  flex-shrink: 0;
+  color: #6f7681;
+}
+
+.manifest-phone-number {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.66rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.manifest-phone-action {
+  margin-left: auto;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.18rem 0.32rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: #8b93a0;
+  font: inherit;
+  font-size: 0.55rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.manifest-phone-action:hover {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fcd34d;
+}
+
+.manifest-phone-action:focus-visible {
+  outline: 2px solid rgba(245, 158, 11, 0.55);
+  outline-offset: 2px;
+}
+
+.manifest-phone-action.is-copied,
+.manifest-phone-copy.is-copied .manifest-phone-action {
+  color: #6ee7b7;
+}
+
+.manifest-phone-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.manifest-phone-action svg {
+  width: 0.68rem;
+  height: 0.68rem;
+  color: currentColor;
+}
+
+.manifest-docs {
+  padding-top: 0.1rem;
+}
+
+.manifest-docs__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #6f7681;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.manifest-docs__count {
+  color: #9aa1ac;
+  font-size: 0.57rem;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.manifest-doc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  margin-top: 0.42rem;
+}
+
+.manifest-doc-grid .doc-chip {
+  padding: 0.16rem 0.46rem;
+  font-size: 0.57rem;
+  line-height: 1.1rem;
+  transition: border-color 0.3s ease, background 0.3s ease, color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* Dokumen yang sudah terisi/terunggah selalu hijau. Status PROSES berarti
+   berkas sudah diunggah dan menunggu approval, jadi tetap hijau. */
+.manifest-doc-grid .doc-chip.is-complete,
+.manifest-doc-grid .doc-chip.is-process {
+  border-color: rgba(52, 211, 153, 0.26);
+  background: linear-gradient(
+    180deg,
+    rgba(52, 211, 153, 0.14),
+    rgba(52, 211, 153, 0.06)
+  );
+  color: #bbf7d0;
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.04);
+}
+
+.manifest-doc-grid .doc-chip.is-complete .doc-mark,
+.manifest-doc-grid .doc-chip.is-process .doc-mark {
+  color: #34d399;
+}
+
+.manifest-doc-grid .doc-chip.is-process {
+  border-style: dashed;
+}
+
+.manifest-doc-grid .doc-chip.is-missing {
+  border-color: rgba(248, 113, 113, 0.26);
+  background: rgba(239, 68, 68, 0.09);
+  color: #fecaca;
+}
+
+.manifest-doc-grid .doc-chip.is-missing .doc-mark {
+  color: #f87171;
+}
+
+/* Animasi halus saat polling live mengubah status dokumen. */
+@keyframes manifest-doc-filled {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.48);
+    background: rgba(248, 113, 113, 0.18);
+    border-color: rgba(248, 113, 113, 0.42);
+  }
+  45% {
+    box-shadow: 0 0 0 5px rgba(52, 211, 153, 0.08);
+    background: rgba(52, 211, 153, 0.24);
+    border-color: rgba(52, 211, 153, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
+@keyframes manifest-doc-missing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.42);
+    background: rgba(52, 211, 153, 0.18);
+    border-color: rgba(52, 211, 153, 0.42);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0);
+  }
+}
+
+.doc-chip.is-just-filled {
+  animation: manifest-doc-filled 1.4s ease-out;
+}
+
+.doc-chip.is-just-missing {
+  animation: manifest-doc-missing 1.1s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-chip.is-just-filled,
+  .doc-chip.is-just-missing {
+    animation: none;
+  }
+}
+
+.manifest-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.64rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.manifest-progress-line {
+  display: flex;
+  min-width: 8rem;
+  flex: 1;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.manifest-progress-line .manifest-progress-track {
+  width: 4.5rem;
+  flex-shrink: 0;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.manifest-progress-line .progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #f87171;
+  transition: width 0.3s ease-out;
+}
+
+.manifest-progress-line .progress-fill.is-complete {
+  background: #34d399;
+}
+
+.manifest-progress-line .progress-fill.is-partial {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.manifest-progress-copy {
+  min-width: 0;
+  color: #7d8490;
+  font-size: 0.56rem;
+  line-height: 1.25;
+}
+
+.manifest-progress-copy strong {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.manifest-progress-copy.is-missing strong {
+  color: #fca5a5;
+}
+
+.manifest-progress-copy.is-complete strong {
+  color: #6ee7b7;
+}
+
+.manifest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.42rem;
+}
+
+.manifest-action {
+  display: inline-flex;
+  min-height: 1.95rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.38rem 0.62rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  font-size: 0.59rem;
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 0.17s ease, background 0.17s ease,
+    color 0.17s ease, transform 0.17s ease;
+}
+
+.manifest-action svg {
+  width: 0.76rem;
+  height: 0.76rem;
+  flex-shrink: 0;
+}
+
+.manifest-action:focus-visible {
+  outline: 2px solid rgba(245, 158, 11, 0.65);
+  outline-offset: 2px;
+}
+
+.manifest-action--primary {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, #f5b545, #e9a11a);
+  color: #201303;
+  font-weight: 750;
+  box-shadow: 0 8px 20px -14px rgba(245, 158, 11, 0.9);
+}
+
+.manifest-action--primary:hover {
+  background: linear-gradient(180deg, #f8c35f, #f0ab2b);
+  transform: translateY(-1px);
+}
+
+.manifest-action--ghost {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd5e1;
+}
+
+.manifest-action--ghost:hover {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fcd34d;
+}
+
+.manifest-action--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: #8b93a0;
+}
+
+.manifest-action--quiet:hover {
+  background: rgba(255, 255, 255, 0.045);
+  color: #e5e7eb;
+}
+
+.manifest-docs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.7rem;
+  margin-top: 0.55rem;
+  color: #6f7681;
+  font-size: 0.55rem;
+}
+
+.manifest-docs-legend .doc-chip {
+  padding: 0.08rem 0.36rem;
+  font-size: 0.53rem;
+  line-height: 0.9rem;
+}
+
+@media (min-width: 1100px) {
+  #manifest-list.manifest-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+@media (max-width: 639px) {
+  #manifest-month-shell {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .manifest-order {
+    padding: 0.72rem;
+  }
+
+  .manifest-order__head {
+    flex-wrap: wrap;
+  }
+
+  .manifest-order__code {
+    white-space: normal;
+  }
+
+  .manifest-order__package {
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .manifest-order__summary-head {
+    flex-wrap: wrap;
+  }
+
+  .manifest-order__summary-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .manifest-jamaah {
+    padding: 0.56rem 0.6rem;
+  }
+
+  .manifest-jamaah__footer .manifest-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .manifest-jamaah__footer .manifest-actions .manifest-action {
+    flex: 1 1 auto;
+  }
+
+  .manifest-card {
+    padding: 0.9rem;
+  }
+
+  .manifest-card__head {
+    gap: 0.45rem;
+  }
+
+  .manifest-card__name {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .manifest-card__context {
+    gap: 0.36rem 0.6rem;
+  }
+
+  .manifest-card__footer {
+    align-items: stretch;
+  }
+
+  .manifest-progress-line {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .manifest-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .manifest-actions .manifest-action {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manifest-card,
+  .manifest-card:hover,
+  .manifest-action--primary:hover {
+    transform: none !important;
+  }
+}

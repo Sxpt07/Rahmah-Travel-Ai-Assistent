@@ -1,0 +1,472 @@
+/**
+ * Modal Rapihin Kata (Rahmah Style).
+ * Dipakai oleh FU dokumen, FU Pelunasan, dan balasan chat operasional.
+ */
+
+.rp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.rp-overlay[hidden] {
+  display: none;
+}
+
+body.rp-open {
+  overflow: hidden;
+}
+
+.rp-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.08), transparent 55%),
+    rgba(3, 4, 7, 0.82);
+  backdrop-filter: blur(9px);
+}
+
+.rp-panel {
+  position: relative;
+  display: flex;
+  width: min(720px, 100%);
+  max-height: min(90vh, 860px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 1.15rem;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(245, 158, 11, 0.11), transparent 42%),
+    linear-gradient(180deg, #111319 0%, #0b0d11 100%);
+  box-shadow:
+    0 30px 90px -30px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  animation: rp-in 0.18s ease-out;
+}
+
+@keyframes rp-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.rp-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 1rem 1.05rem 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.rp-mark {
+  display: inline-flex;
+  width: 2.15rem;
+  height: 2.15rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(245, 158, 11, 0.36);
+  border-radius: 0.7rem;
+  background: linear-gradient(145deg, rgba(245, 181, 69, 0.95), rgba(233, 161, 26, 0.85));
+  color: #201303;
+  box-shadow: 0 10px 26px -16px rgba(245, 158, 11, 0.9);
+}
+
+.rp-mark svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.rp-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.rp-kicker {
+  margin: 0 0 0.15rem;
+  color: #f5b545;
+  font-size: 0.56rem;
+  font-weight: 750;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.rp-title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.rp-subtitle {
+  margin: 0.2rem 0 0;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-close {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.rp-close:hover {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.09);
+  color: #f8fafc;
+}
+
+.rp-close svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.rp-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.9rem 1.05rem 0.4rem;
+}
+
+.rp-status {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.42rem;
+  margin-bottom: 0.65rem;
+  padding: 0.32rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #94a3b8;
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.rp-status__dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #f5b545;
+}
+
+.rp-status.is-busy .rp-status__dot {
+  animation: rp-pulse 0.9s ease-in-out infinite;
+}
+
+.rp-status.is-ready {
+  border-color: rgba(52, 211, 153, 0.25);
+  background: rgba(52, 211, 153, 0.07);
+  color: #6ee7b7;
+}
+
+.rp-status.is-ready .rp-status__dot {
+  background: #34d399;
+}
+
+.rp-status.is-warn {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.07);
+  color: #fcd34d;
+}
+
+@keyframes rp-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.rp-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #cbd5e1;
+  font-size: 0.63rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.rp-textarea {
+  display: block;
+  width: 100%;
+  min-height: 13rem;
+  max-height: 46vh;
+  resize: vertical;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.7rem;
+  padding: 0.8rem 0.85rem;
+  background: rgba(4, 6, 10, 0.72);
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.58;
+  tab-size: 2;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.rp-textarea:focus {
+  border-color: rgba(245, 158, 11, 0.5);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.11);
+}
+
+.rp-textarea:disabled {
+  opacity: 0.72;
+}
+
+.rp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  color: #64748b;
+  font-size: 0.58rem;
+}
+
+.rp-original {
+  margin-top: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.rp-original summary {
+  padding: 0.5rem 0.65rem;
+  color: #94a3b8;
+  font-size: 0.62rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rp-original summary:hover {
+  color: #fcd34d;
+}
+
+.rp-original pre {
+  max-height: 10rem;
+  margin: 0;
+  overflow: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0.65rem;
+  color: #9ca3af;
+  font-family: inherit;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rp-error {
+  margin: 0.65rem 0 0;
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  border-radius: 0.55rem;
+  padding: 0.48rem 0.6rem;
+  background: rgba(248, 113, 113, 0.07);
+  color: #fca5a5;
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.rp-error[hidden] {
+  display: none;
+}
+
+.rp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  padding: 0.8rem 1.05rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(7, 8, 12, 0.55);
+}
+
+.rp-btn {
+  display: inline-flex;
+  min-height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  padding: 0.48rem 0.85rem;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease,
+    background 0.16s ease, color 0.16s ease, filter 0.16s ease;
+}
+
+.rp-btn svg {
+  width: 0.86rem;
+  height: 0.86rem;
+  flex-shrink: 0;
+}
+
+.rp-btn:focus-visible {
+  outline: 2px solid rgba(245, 158, 11, 0.65);
+  outline-offset: 2px;
+}
+
+.rp-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.rp-btn--ghost {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd5e1;
+}
+
+.rp-btn--ghost:hover:not(:disabled) {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+}
+
+.rp-btn--primary {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: linear-gradient(180deg, #f5b545, #e9a11a);
+  color: #201303;
+  box-shadow: 0 10px 24px -16px rgba(245, 158, 11, 0.9);
+}
+
+.rp-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.rp-btn--primary.is-copied {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: linear-gradient(180deg, #34d399, #10b981);
+  color: #04140e;
+  transform: none;
+}
+
+/* Tombol pemicu di kartu manifest. */
+.manifest-action.manifest-action--polish {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.06);
+  color: #fcd34d;
+}
+
+.manifest-action.manifest-action--polish:hover {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+}
+
+.manifest-order__polish {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.09);
+  color: #fcd34d;
+  box-shadow: none;
+}
+
+.manifest-order__polish:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.16);
+  filter: none;
+}
+
+/* Tombol pemicu di kartu FU Pelunasan. */
+.fu-btn--polish {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.07);
+  color: #fcd34d;
+}
+
+.fu-btn--polish:hover:not(:disabled) {
+  border-color: rgba(245, 158, 11, 0.44);
+  background: rgba(245, 158, 11, 0.13);
+  color: #fde68a;
+}
+
+@media (max-width: 560px) {
+  .rp-overlay {
+    padding: 0;
+  }
+
+  .rp-panel {
+    width: 100%;
+    max-height: 100dvh;
+    min-height: 100dvh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .rp-head {
+    padding: 0.85rem 0.8rem 0.7rem;
+  }
+
+  .rp-body {
+    padding: 0.75rem 0.8rem 0.35rem;
+  }
+
+  .rp-textarea {
+    min-height: 12rem;
+    max-height: none;
+    font-size: 0.8rem;
+  }
+
+  .rp-foot {
+    padding: 0.7rem 0.8rem 0.85rem;
+  }
+
+  .rp-btn {
+    flex: 1;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-panel,
+  .rp-btn,
+  .rp-close,
+  .rp-textarea {
+    animation: none;
+    transition: none;
+  }
+
+  .rp-status.is-busy .rp-status__dot {
+    animation: none;
+  }
+}

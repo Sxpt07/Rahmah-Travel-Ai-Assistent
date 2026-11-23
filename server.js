@@ -1,5 +1,7 @@
 import 'dotenv/config';
 
+import { isVercelRuntime } from './services/runtimeEnv.js';
+
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -1404,51 +1406,87 @@ app.get('/api/seats', (req, res) => {
   });
 });
 
+app.get('/api/runtime', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const vercel = isVercelRuntime();
+  const ai = getAIStatus();
+  const missing = [];
+  if (!ai.keyConfigured) missing.push('GEMINI_API_KEY');
+  if (!process.env.SGO_BASE_URL) missing.push('SGO_BASE_URL(optional)');
+  res.json({
+    success: true,
+    runtime: vercel ? 'vercel' : 'node',
+    vercel,
+    nodeEnv: NODE_ENV,
+    aiReady: ai.ready,
+    aiKeyConfigured: ai.keyConfigured,
+    missingEnv: missing.filter((item) => !item.endsWith('(optional)')),
+    optionalEnv: missing.filter((item) => item.endsWith('(optional)')).map((item) => item.replace('(optional)', '')),
+  });
+});
+
 app.use((req, res) => {
-  res.status(404).json({ success: false, error: `Route ${req.method} ${req.originalUrl} not found.` });
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.originalUrl} not found.`,
+    code: 'ROUTE_NOT_FOUND',
+  });
 });
 
 app.use((error, req, res, next) => {
   if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
-    return res.status(400).json({ success: false, error: 'Invalid JSON body.' });
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid JSON body.',
+      code: 'INVALID_JSON',
+    });
   }
   console.error('[server]', error);
-  return res.status(500).json({ success: false, error: 'Internal server error.' });
+  const message = isVercelRuntime()
+    ? 'Internal server error.'
+    : error?.message || 'Internal server error.';
+  return res.status(500).json({
+    success: false,
+    error: message,
+    code: 'INTERNAL_SERVER_ERROR',
+  });
 });
 
-const server = app.listen(PORT, () => {
-  const ai = getAIStatus();
-  console.log(`\n🕌 Umrah & Hajj AI Assistant`);
-  console.log(`   Server   : http://localhost:${PORT}`);
-  console.log(`   AI       : gemini ${ai.ready ? `[READY] -> ${ai.activeModel}` : '[NO KEY]'}`);
-  console.log(`   Models   : ${ai.models.join(' | ')}`);
-  const envSessionLength = getEnvSession().length;
-  const jamaahCount = getActiveJamaah().length;
-  const coverage = getJamaahSource()?.fieldCoverage || {};
-  const rawStored = getSgoRawStatus().filter((item) => item?.response).length;
-  console.log(
-    `   Jamaah   : ${jamaahCount} data permanen | NIK ${coverage.nik || 0} | Paspor ${coverage.passport || 0} | Manifest ${coverage.manifestId || 0}`,
-  );
-  console.log(`   Data     : ${getJamaahDataFilePath()}`);
-  console.log(
-    `   SGO Raw  : ${rawStored}/${SGO_RAW_MODULES.length} respons modul tersimpan`,
-  );
-  console.log(
-    `   SGO Cookie: per perangkat via tombol Cookie SGO${envSessionLength ? ` | .env portal tersedia (${envSessionLength} karakter)` : ''}`,
-  );
-  console.log(
-    `   Endpoints: POST /api/chat | POST /api/message/rapihin | GET /api/jamaah | GET /api/monitoring/summary | GET /api/manifest/docs | POST /api/jamaah/scrape-cookie`,
-  );
-  console.log(`   Health   : GET /api/health\n`);
-});
+if (!isVercelRuntime()) {
+  const server = app.listen(PORT, () => {
+    const ai = getAIStatus();
+    console.log(`\n🕌 Umrah & Hajj AI Assistant`);
+    console.log(`   Server   : http://localhost:${PORT}`);
+    console.log(`   AI       : gemini ${ai.ready ? `[READY] -> ${ai.activeModel}` : '[NO KEY]'}`);
+    console.log(`   Models   : ${ai.models.join(' | ')}`);
+    const envSessionLength = getEnvSession().length;
+    const jamaahCount = getActiveJamaah().length;
+    const coverage = getJamaahSource()?.fieldCoverage || {};
+    const rawStored = getSgoRawStatus().filter((item) => item?.response).length;
+    console.log(
+      `   Jamaah   : ${jamaahCount} data permanen | NIK ${coverage.nik || 0} | Paspor ${coverage.passport || 0} | Manifest ${coverage.manifestId || 0}`,
+    );
+    console.log(`   Data     : ${getJamaahDataFilePath()}`);
+    console.log(
+      `   SGO Raw  : ${rawStored}/${SGO_RAW_MODULES.length} respons modul tersimpan`,
+    );
+    console.log(
+      `   SGO Cookie: per perangkat via tombol Cookie SGO${envSessionLength ? ` | .env portal tersedia (${envSessionLength} karakter)` : ''}`,
+    );
+    console.log(
+      `   Endpoints: POST /api/chat | POST /api/message/rapihin | GET /api/jamaah | GET /api/monitoring/summary | GET /api/manifest/docs | POST /api/jamaah/scrape-cookie`,
+    );
+    console.log(`   Health   : GET /api/health\n`);
+  });
 
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use. Change PORT in .env or stop the other process.`);
-  } else {
-    console.error('❌ Server error:', error.message);
-  }
-  process.exit(1);
-});
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${PORT} is already in use. Change PORT in .env or stop the other process.`);
+    } else {
+      console.error('❌ Server error:', error.message);
+    }
+    process.exit(1);
+  });
+}
 
 export default app;

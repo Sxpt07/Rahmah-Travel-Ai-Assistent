@@ -11,7 +11,7 @@
  */
 
 import { classifyIntent } from './aiEngine.js';
-import { findJamaah } from '../data/jamaahStore.js';
+import { findJamaah, getAllJamaah } from '../data/jamaahStore.js';
 import { buildSafeJamaahRow } from './documentStatus.js';
 import { resolveOrderQuery } from './orderSearch.js';
 
@@ -21,6 +21,40 @@ function statusLabel(row = {}) {
   return row.isComplete
     ? `Lengkap (${row.progressLabel})`
     : `Belum lengkap (${row.progressLabel})`;
+}
+
+/**
+ * Bangun item aman + jumlah jamaah per order. Jumlah dihitung dari seluruh
+ * data jamaah aktif, bukan hanya baris yang ditampilkan, supaya badge order
+ * tetap menunjukkan total jamaah yang benar saat pencarian memakai nama.
+ */
+function orderCountKey(row = {}) {
+  return String(
+    row.orderCode || row.kodeOrder || row.orderId || row.order_id || '',
+  )
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function withOrderCounts(allRows = [], selectedRows = []) {
+  const counts = new Map();
+
+  // Hitung dari seluruh data jamaah, bukan hanya baris hasil pencarian. Dengan
+  // begitu header order tetap menampilkan jumlah jamaah yang benar meskipun
+  // admin mencari satu nama jamaah di dalam order tersebut.
+  const universe = getAllJamaah();
+  const source = universe.length ? universe : allRows;
+
+  source.forEach((row) => {
+    const key = orderCountKey(row);
+    if (key) counts.set(key, (counts.get(key) || 0) + 1);
+  });
+
+  return selectedRows.map((row, index) => {
+    const safe = buildSafeJamaahRow(row, index);
+    const key = orderCountKey(row);
+    return { ...safe, jamaahCount: counts.get(key) || 1 };
+  });
 }
 
 function buildExactOrderReply(orderResult = {}, items = []) {
@@ -91,7 +125,7 @@ export function buildChatJamaahResults(message, chatResult = {}) {
   const orderResult = resolveOrderQuery(text);
   if (orderResult) {
     const shown = orderResult.matches.slice(0, MAX_CHAT_ROWS);
-    const items = shown.map((row, index) => buildSafeJamaahRow(row, index));
+    const items = withOrderCounts(orderResult.matches, shown);
 
     return {
       exactOrder: true,
@@ -138,7 +172,7 @@ export function buildChatJamaahResults(message, chatResult = {}) {
     totalMatched: result.matches.length,
     returned: matches.length,
     truncated: result.matches.length > matches.length,
-    items: matches.map((row, index) => buildSafeJamaahRow(row, index)),
+    items: withOrderCounts(result.matches, matches),
   };
 }
 

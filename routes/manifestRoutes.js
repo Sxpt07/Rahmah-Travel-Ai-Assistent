@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import {
   getJamaahData,
-  getJamaahSource,
   hasRealJamaahData,
 } from '../data/jamaahStore.js';
+import { buildWhatsAppDraft } from '../services/documentStatus.js';
 import {
-  buildManifestPage,
-  buildMonitoringSummary,
-  buildWhatsAppDraft,
-} from '../services/documentStatus.js';
+  getManifestLiveStates,
+  getManifestOrderRows,
+  getManifestSnapshot,
+} from '../services/manifestStore.js';
 
 const router = Router();
 
@@ -26,32 +26,87 @@ function findRowById(id = '') {
 }
 
 /**
- * Daftar dokumen jamaah dengan pencarian server-side:
- * nama, kode order (ORD-...), short code, atau nomor HP.
- * Nomor HP hanya dipakai untuk mencocokkan dan tidak ikut dikembalikan.
+ * Daftar dokumen jamaah dengan filter bulan/status dan pencarian server-side:
+ * nama, kode order, short code, RTB, atau nomor HP. Data dibaca dari cache
+ * SQLite manifest yang disinkronkan dari getJamaahData().
  */
 router.get('/docs', (req, res) => {
   try {
-    const rows = getJamaahData();
-    const pageData = buildManifestPage(rows, {
+    const pageData = getManifestSnapshot({
       query: typeof req.query.q === 'string' ? req.query.q : '',
       status: typeof req.query.status === 'string' ? req.query.status : 'all',
+      month: typeof req.query.month === 'string' ? req.query.month : 'all',
       page: req.query.page,
       limit: req.query.limit,
+      force: req.query.refresh === '1',
     });
-    const summary = buildMonitoringSummary(rows, getJamaahSource());
 
     res.json({
       success: true,
       hasRealData: hasRealJamaahData(),
       ...pageData,
-      summary,
     });
   } catch (error) {
     console.error('[manifest] gagal memuat dokumen:', error.message);
     res.status(500).json({
       success: false,
       error: 'Gagal memuat data kelengkapan dokumen jamaah.',
+    });
+  }
+});
+
+/**
+ * Status dokumen terbaru untuk kartu yang sedang terlihat. Dipakai polling
+ * frontend saat sync penuh berjalan agar badge berubah merah -> hijau secara
+ * real-time tanpa memuat ulang seluruh halaman dan mengacak urutan kartu.
+ */
+router.get('/docs/live', (req, res) => {
+  try {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      items: getManifestLiveStates(ids),
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('[manifest] gagal memuat status live:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Gagal memuat status dokumen terbaru.',
+    });
+  }
+});
+
+/**
+ * Seluruh jamaah dalam satu kode order. Dipakai tombol “Copy FU Keluarga”
+ * agar pesan tetap mencakup semua jamaah meskipun daftar sedang difilter.
+ */
+router.get('/docs/order/:orderCode', (req, res) => {
+  try {
+    const orderCode = String(req.params.orderCode || '').trim();
+    const rows = getManifestOrderRows(orderCode);
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order tidak ditemukan.',
+      });
+    }
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      orderCode: rows[0].orderCode || orderCode,
+      rows,
+    });
+  } catch (error) {
+    console.error('[manifest] gagal memuat jamaah order:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Gagal memuat seluruh jamaah pada order.',
     });
   }
 });
