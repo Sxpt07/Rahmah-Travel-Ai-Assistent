@@ -20,6 +20,29 @@ const SGO_MODULES = [
     hint: 'Cek kelengkapan dokumen dan manifest jamaah.',
     cta: 'Sinkronkan Manifest',
   },
+  {
+    path: '/ops/worksheet-perlengkapan',
+    label: 'Worksheet Perlengkapan',
+    hint: 'Pemesan, jamaah, telepon, paket, RTB, keberangkatan, dan ukuran jaket.',
+    cta: 'Muat Ulang Worksheet',
+    viewOnly: true,
+  },
+  {
+    path: '/ops/fu-pelunasan',
+    label: 'FU Pelunasan',
+    hint: 'Penagihan aging RED, sisa tagihan, link invoice, dan template WhatsApp.',
+    cta: 'Muat Ulang FU Pelunasan',
+    viewOnly: true,
+    refreshEvent: 'umrah:fu-pelunasan-refresh',
+  },
+  {
+    path: '/ops/add-on',
+    label: 'Add-on Per Batch',
+    hint: 'Rekap add-on per jenis, pencarian RTB/nama/order, dan rincian jamaah per batch.',
+    cta: 'Sinkronkan Add-on',
+    viewOnly: true,
+    refreshEvent: 'umrah:addon-refresh',
+  },
 ];
 const SGO_MODULE_PATHS = SGO_MODULES.map((module) => module.path);
 const DEFAULT_MODULE_PATH = SGO_MODULES[0].path;
@@ -66,8 +89,6 @@ const serverHealthEl = document.getElementById('server-health');
 const aiProviderEl = document.getElementById('ai-provider');
 const toastContainer = document.getElementById('toast-container');
 
-const jamaahCookieUrl = document.getElementById('jamaah-cookie-url');
-const jamaahCookieStr = document.getElementById('jamaah-cookie-str');
 const jamaahCookieBtn = document.getElementById('jamaah-cookie-btn');
 const moduleSelectEl = document.getElementById('moduleSelect');
 const jamaahClearReal = document.getElementById('jamaah-clear-real');
@@ -75,9 +96,6 @@ const jamaahStatusText = document.getElementById('jamaah-status-text');
 const sgoLiveBadge = document.getElementById('sgo-live-badge');
 const sgoLiveBadgeText = document.getElementById('sgo-live-badge-text');
 const sgoScrapeProgress = document.getElementById('sgo-scrape-progress');
-const sgoScrapeStatus = document.getElementById('sgo-scrape-status');
-const sgoScrapeCount = document.getElementById('sgo-scrape-count');
-const sgoScrapeBar = document.getElementById('sgo-scrape-bar');
 const sidebarDataCount = document.getElementById('sidebar-data-count');
 const moduleMenuButtons = Array.from(document.querySelectorAll('[data-module-path]'));
 const manifestDropzone = document.getElementById('manifest-dropzone');
@@ -305,6 +323,12 @@ function setupEventListeners() {
       return;
     }
 
+    const polishBtn = event.target.closest('[data-polish-chat]');
+    if (polishBtn) {
+      polishChatReply(polishBtn);
+      return;
+    }
+
     const copyBtn = event.target.closest('[data-copy]');
     if (copyBtn) {
       copyMessageText(copyBtn);
@@ -449,13 +473,20 @@ function restoreActiveFocus() {
     saved = localStorage.getItem('umrah_active_focus_v2') || '';
     localStorage.removeItem('umrah_active_focus');
   } catch (e) {}
-  moduleSelectEl.value = SGO_MODULE_PATHS.includes(saved) ? saved : DEFAULT_MODULE_PATH;
+  const pathFromUrl = window.location.pathname;
+  const initialPath = SGO_MODULE_PATHS.includes(pathFromUrl)
+    ? pathFromUrl
+    : SGO_MODULE_PATHS.includes(saved)
+      ? saved
+      : DEFAULT_MODULE_PATH;
+  moduleSelectEl.value = initialPath;
+  try {
+    localStorage.setItem('umrah_active_focus_v2', initialPath);
+  } catch (e) {}
   updateModulePresentation();
 }
 
 async function handleJamaahCookieScrape() {
-  const url = jamaahCookieUrl ? jamaahCookieUrl.value.trim() : '';
-  const cookie = jamaahCookieStr ? jamaahCookieStr.value.trim() : '';
   const focusModule = moduleSelectEl ? moduleSelectEl.value : DEFAULT_MODULE_PATH;
   const moduleLabel = sgoModuleLabel(focusModule);
 
@@ -464,47 +495,94 @@ async function handleJamaahCookieScrape() {
     return;
   }
 
-  // URL dan cookie boleh kosong; server otomatis memakai SGO_BASE_URL dan
-  // SGO_ADMIN_SESSION dari .env.
-  if (jamaahCookieBtn) {
-    jamaahCookieBtn.disabled = true;
-    jamaahCookieBtn.innerHTML = `<div class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/30 border-t-black"></div><span>Memuat ${escapeHtml(moduleLabel)}...</span>`;
+  const focusMeta = SGO_MODULES.find((item) => item.path === focusModule);
+  if (focusMeta?.viewOnly) {
+    document.dispatchEvent(
+      new CustomEvent(focusMeta.refreshEvent || 'umrah:worksheet-refresh', {
+        detail: { path: focusModule, source: 'sidebar' },
+      }),
+    );
+    return;
   }
+
   if (moduleSelectEl) moduleSelectEl.disabled = true;
   setModuleMenuDisabled(true);
-  if (sgoScrapeProgress) {
-    sgoScrapeProgress.classList.remove('hidden');
-    if (sgoScrapeBar) sgoScrapeBar.style.width = '18%';
-    if (sgoScrapeStatus) sgoScrapeStatus.textContent = `Memuat ${moduleLabel}...`;
-    if (sgoScrapeCount) sgoScrapeCount.textContent = '[0/1]';
-  }
+
+  const isManifestFocus = focusModule === '/ops/upload-documents';
+  const result = await window.SgoSync.run({
+    panel: sgoScrapeProgress,
+    button: jamaahCookieBtn,
+    endpoint: `${API_BASE}/api/jamaah/scrape-cookie`,
+    body: {
+      js: true,
+      focusModule,
+      skipManifest: isManifestFocus,
+    },
+    label: moduleLabel,
+    busyLabel: `Memuat ${moduleLabel}...`,
+    onProgress: isManifestFocus
+      ? (progress) => {
+          document.dispatchEvent(
+            new CustomEvent('umrah:sync-progress', {
+              detail: { ...progress, module: focusModule },
+            }),
+          );
+        }
+      : undefined,
+  });
 
   try {
-    const res = await fetch(`${API_BASE}/api/jamaah/scrape-cookie`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, cookie, js: true, focusModule }),
-    });
-    const data = await res.json();
+    if (!result.ok) {
+      if (!result.busy) {
+        const errorData = result.data || {};
+        if (
+          errorData.code === 'SGO_COOKIE_MISSING' ||
+          errorData.code === 'SGO_AUTH'
+        ) {
+          if (errorData.code === 'SGO_AUTH' && window.RahmahSgoCookie) {
+            window.RahmahSgoCookie.markExpired(result.error || errorData.error);
+          } else if (window.RahmahSgoCookie) {
+            window.RahmahSgoCookie.markEmpty(result.error || errorData.error);
+          }
+          if (window.RahmahSgoCookie) window.RahmahSgoCookie.open();
+        }
+        showToast(
+          'Error',
+          result.error || 'Gagal sinkronisasi SGO',
+          'error',
+        );
+      }
+      return;
+    }
 
-    const modules = Array.isArray(data.modules) ? data.modules : [];
-    const visitedModules = data.success ? Math.min(modules.length || 1, 1) : 0;
+    const data = result.data || {};
 
-    if (sgoScrapeBar) sgoScrapeBar.style.width = '100%';
-    if (sgoScrapeCount) sgoScrapeCount.textContent = `[${visitedModules}/1]`;
+    // Request menyusul sinkronisasi yang sudah berjalan: server mengembalikan
+    // status 409, lalu UI menunggu sesi tersebut selesai. Jangan tampilkan
+    // error, cukup beri info dan segarkan status.
+    if (result.busy) {
+      showToast(
+        'Info',
+        data.message || 'Sinkronisasi SGO yang sedang berjalan telah selesai.',
+        'info',
+      );
+      await fetchJamaahStatus();
+      document.dispatchEvent(
+        new CustomEvent('umrah:data-updated', {
+          detail: {
+            source: 'scrape',
+            count: Number(data.totalJamaah || data.rows || 0),
+            module: focusModule,
+          },
+        }),
+      );
+      return;
+    }
 
     if (data.success) {
       const moduleLoaded = data.moduleLoaded === true;
       const count = Number(data.count || 0);
       const isEmpty = data.empty === true || (!moduleLoaded && count === 0);
-
-      if (sgoScrapeStatus) {
-        sgoScrapeStatus.textContent = moduleLoaded
-          ? `${moduleLabel} dimuat`
-          : isEmpty
-            ? `${moduleLabel}: 0 data`
-            : `${moduleLabel} selesai`;
-      }
 
       showToast(
         isEmpty ? 'Info' : 'Success',
@@ -550,30 +628,13 @@ async function handleJamaahCookieScrape() {
         );
       }
     } else {
-      if (sgoScrapeStatus) sgoScrapeStatus.textContent = 'Gagal';
-      if (sgoScrapeCount) sgoScrapeCount.textContent = '[0/1]';
       showToast('Error', data.error || 'Gagal sinkronisasi SGO', 'error');
     }
-  } catch (e) {
-    showToast('Error', 'Network error saat sinkronisasi SGO', 'error');
-    if (sgoScrapeProgress) {
-      if (sgoScrapeBar) sgoScrapeBar.style.width = '100%';
-      if (sgoScrapeStatus) sgoScrapeStatus.textContent = 'Gagal';
-      if (sgoScrapeCount) sgoScrapeCount.textContent = '[0/1]';
-    }
   } finally {
-    if (jamaahCookieBtn) {
-      jamaahCookieBtn.disabled = false;
-      jamaahCookieBtn.innerHTML = '<i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i><span></span>';
-      updateScrapeButtonLabel();
-    }
     if (moduleSelectEl) moduleSelectEl.disabled = false;
     setModuleMenuDisabled(false);
+    updateScrapeButtonLabel();
     if (window.lucide) lucide.createIcons();
-    setTimeout(() => {
-      if (sgoScrapeProgress) sgoScrapeProgress.classList.add('hidden');
-      if (sgoScrapeBar) sgoScrapeBar.style.width = '0%';
-    }, 2000);
   }
 }
 
@@ -789,6 +850,7 @@ async function handleSendMessage() {
         usedJamaahLookup: data.usedJamaahLookup,
         matchedCount: data.matchedCount,
         jamaahResults: data.jamaahResults || null,
+        addonResults: data.addonResults || null,
         latencyMs: data.latencyMs,
       });
 
@@ -832,6 +894,11 @@ const SOURCE_META = {
     icon: 'database',
     className: 'border-gold-400/25 bg-gold-400/[0.08] text-gold-200',
   },
+  'addon-data': {
+    label: 'Add-on SGO',
+    icon: 'gift',
+    className: 'border-gold-400/25 bg-gold-400/[0.08] text-gold-200',
+  },
   gemini: {
     label: 'Gemini',
     icon: 'sparkles',
@@ -864,6 +931,7 @@ const INTENT_LABELS = {
   'data-count': 'Jumlah jamaah',
   'data-filter': 'Filter jamaah',
   'data-lookup': 'Cari jamaah',
+  'addon-lookup': 'Cari add-on',
   'data-help': 'Panduan data',
   empty: 'Kosong',
   error: 'Error',
@@ -893,14 +961,20 @@ function renderIntentBadge(meta = {}) {
 function renderLookupBadge(meta = {}) {
   if (!meta.usedJamaahLookup) return '';
   const found = Number(meta.matchedCount || 0);
-  const text = found > 0 ? `${found} data ditemukan` : 'Data tidak ditemukan';
+  const isAddon = meta.source === 'addon-data';
+  const text =
+    found > 0
+      ? `${found} ${isAddon ? 'add-on' : 'data'} ditemukan`
+      : isAddon
+        ? 'Add-on tidak ditemukan'
+        : 'Data tidak ditemukan';
   const tone =
     found > 0
       ? 'border-gold-400/25 bg-gold-400/[0.08] text-gold-200'
       : 'border-amber-400/20 bg-amber-400/[0.08] text-amber-300';
   return `
     <span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone}">
-      <i data-lucide="${found > 0 ? 'users' : 'search-x'}" class="h-3 w-3"></i>
+      <i data-lucide="${found > 0 ? (isAddon ? 'gift' : 'users') : 'search-x'}" class="h-3 w-3"></i>
       ${escapeHtml(text)}
     </span>
   `;
@@ -1011,28 +1085,41 @@ function renderChatJamaahCard(row = {}) {
   const note = missingCount
     ? `× ${missingCount} dokumen belum lengkap`
     : progressCount
-      ? `• ${progressCount} dokumen dalam proses`
+      ? `• ${progressCount} dokumen menunggu approval`
       : '✓ Semua dokumen lengkap';
   const noteClass = missingCount
     ? 'is-missing'
     : progressCount
       ? 'is-process'
       : 'is-complete';
-  const orderCode = String(row.orderCode || '').trim();
-  const manageButton = orderCode
+  const jamaahId = String(row.id || '').trim();
+  const manageButton = jamaahId && /^\d+$/.test(jamaahId)
     ? `
-      <button type="button" data-manage-order="${escapeAttr(orderCode)}"
-        aria-label="Kelola dokumen untuk ${escapeAttr(row.nama || 'jamaah')}"
+      <a href="/ops/monitoring_jamaah/${encodeURIComponent(jamaahId)}/edit"
+        target="_blank" rel="noopener noreferrer"
+        aria-label="Kelola dokumen untuk ${escapeAttr(row.nama || 'jamaah')} di tab baru"
         class="chat-manage-btn inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-semibold">
         <i data-lucide="folder-open" class="h-3.5 w-3.5"></i>
         <span>Kelola Dokumen</span>
         <i data-lucide="arrow-up-right" class="h-3 w-3"></i>
-      </button>
+      </a>
+    `
+    : '';
+  const invoiceUrl = String(row.invoiceUrl || '').trim();
+  const invoiceButton = /^https?:\/\//i.test(invoiceUrl)
+    ? `
+      <a href="${escapeAttr(invoiceUrl)}" target="_blank" rel="noopener noreferrer"
+        aria-label="Lihat invoice jamaah di tab baru"
+        class="chat-manage-btn inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-semibold">
+        <i data-lucide="receipt-text" class="h-3.5 w-3.5"></i>
+        <span>Lihat Invoice</span>
+        <i data-lucide="arrow-up-right" class="h-3 w-3"></i>
+      </a>
     `
     : '';
 
   return `
-    <article class="chat-jamaah-card">
+    <article class="chat-jamaah-card"${jamaahId ? ` data-chat-jamaah-id="${escapeAttr(jamaahId)}"` : ''}>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-1.5">
@@ -1041,10 +1128,13 @@ function renderChatJamaahCard(row = {}) {
               ${row.isComplete ? '✓ Lengkap' : '× Belum lengkap'}
             </span>
           </div>
-          <p class="mt-0.5 truncate text-[10px] text-slate-500">${escapeHtml(orderCode || 'Kode order belum tersedia')} • ${escapeHtml(row.paket || 'Paket belum tercatat')}</p>
+          <p class="mt-0.5 truncate text-[10px] text-slate-500">${escapeHtml(row.paket || 'Paket belum tercatat')}</p>
           <p class="mt-0.5 text-[9.5px] text-slate-600">Keberangkatan: ${escapeHtml(row.keberangkatan || 'Belum terjadwal')}</p>
         </div>
-        ${manageButton}
+        <div class="flex flex-shrink-0 flex-wrap items-center gap-1 sm:flex-col sm:items-end">
+          ${invoiceButton}
+          ${manageButton}
+        </div>
       </div>
       <div class="mt-2 flex flex-wrap gap-1.5">
         ${(Array.isArray(row.documents) ? row.documents : []).map(renderChatDocChip).join('')}
@@ -1060,11 +1150,272 @@ function renderChatJamaahCard(row = {}) {
   `;
 }
 
+/** Kelompokkan hasil chat berdasarkan order agar header tidak berulang. */
+function groupChatJamaahItems(items = []) {
+  const groups = [];
+  const byOrder = new Map();
+
+  items.forEach((row) => {
+    const orderCode = String(row.orderCode || '').trim().toUpperCase();
+    const key = orderCode || `jamaah:${row.id || row.nama || groups.length}`;
+
+    if (!byOrder.has(key)) {
+      const group = {
+        key,
+        orderCode,
+        pemesan: '',
+        accessCode: '',
+        jamaahCount: 0,
+        rows: [],
+      };
+      byOrder.set(key, group);
+      groups.push(group);
+    }
+
+    const group = byOrder.get(key);
+    group.rows.push(row);
+    if (!group.pemesan) group.pemesan = String(row.pemesan || row.nama || '').trim();
+    if (!group.accessCode) group.accessCode = String(row.accessCode || '').trim();
+
+    const rowCount = Number(row.jamaahCount);
+    if (Number.isFinite(rowCount) && rowCount > group.jamaahCount) {
+      group.jamaahCount = rowCount;
+    }
+  });
+
+  groups.forEach((group) => {
+    if (!group.jamaahCount) group.jamaahCount = group.rows.length;
+  });
+
+  return groups;
+}
+
+function renderChatOrderGroup(group = {}) {
+  const rows = Array.isArray(group.rows) ? group.rows : [];
+  const firstRow = rows[0] || {};
+  const renderHeader = window.OrderAccess?.renderHeader;
+  const header =
+    typeof renderHeader === 'function'
+      ? renderHeader({
+          pemesan: group.pemesan || firstRow.pemesan || firstRow.nama || '',
+          orderCode: group.orderCode,
+          accessCode: group.accessCode,
+          jamaahCount: group.jamaahCount || rows.length,
+          jamaahId: firstRow.id,
+        })
+      : '';
+
+  return `
+    <section class="chat-order-group" data-chat-order="${escapeAttr(group.orderCode || group.key || '')}">
+      ${header}
+      <div class="chat-order-group__body">
+        ${rows.map(renderChatJamaahCard).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderChatAddonResults(payload = null) {
+  if (!payload) return '';
+
+  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  if (!groups.length && !items.length) return '';
+
+  const kind = payload.kind || 'search';
+  const totalMatched = Number(payload.totalMatched || 0);
+  const badge =
+    kind === 'overview'
+      ? `${Number(payload.batches?.length || totalMatched).toLocaleString('id-ID')} batch`
+      : `${(totalMatched || groups.length).toLocaleString('id-ID')} add-on`;
+  const firstOrder =
+    groups[0]?.orderDisplay ||
+    groups[0]?.orderCode ||
+    payload.orderCode ||
+    '';
+  const moduleQuery =
+    kind === 'rtb' && payload.rtb
+      ? `RTB ${payload.rtb}`
+      : kind === 'order' && firstOrder
+        ? firstOrder
+        : '';
+  const moduleHref = `/ops/add-on${
+    moduleQuery ? `?q=${encodeURIComponent(moduleQuery)}` : ''
+  }`;
+
+  const body = groups.length
+    ? groups
+        .map((group) => {
+          const orderDisplay =
+            group.orderDisplay ||
+            (group.orderShort ? `#${group.orderShort}` : '') ||
+            group.orderCode ||
+            'Tanpa kode order';
+          const orderValue =
+            group.orderCode || group.portalOrder || group.orderShort || '';
+          const portal = orderValue
+            ? `/api/portal/login?order=${encodeURIComponent(orderValue)}`
+            : '';
+          const portalMarkup = portal
+            ? `<a href="${escapeAttr(portal)}" target="_blank" rel="noopener noreferrer"
+                 class="inline-flex flex-shrink-0 items-center gap-1 rounded-lg border border-gold-400/30 bg-gold-400/[0.09] px-2 py-1 text-[9.5px] font-semibold text-gold-200 transition-colors hover:bg-gold-400/[0.16]">
+                 <i data-lucide="external-link" class="h-2.5 w-2.5"></i>
+                 Login Portal
+               </a>`
+            : '';
+          const payment = String(group.paymentStatus || '').trim();
+          const paymentUpper = payment.toUpperCase();
+          const paymentTone =
+            !payment || payment === '-'
+              ? 'border-slate-400/15 bg-slate-400/[0.06] text-slate-400'
+              : /LUNAS|PAID|SELESAI|VERIFIED|FULL/.test(paymentUpper) ||
+                  (/(\d{1,3})\s*%/.test(paymentUpper) &&
+                    Number(paymentUpper.match(/(\d{1,3})\s*%/)[1]) >= 100)
+                ? 'border-emerald-400/25 bg-emerald-400/[0.09] text-emerald-200'
+                : 'border-red-400/25 bg-red-400/[0.08] text-red-200';
+          const jamaah = Array.isArray(group.jamaah) ? group.jamaah : [];
+
+          return `
+            <article class="rounded-xl border border-white/[0.07] bg-white/[0.025] p-2.5">
+              <div class="flex flex-wrap items-start justify-between gap-2">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="text-[11px] font-semibold text-white">${escapeHtml(orderDisplay)}</span>
+                    <span class="rounded-full border border-gold-400/20 bg-gold-400/[0.07] px-1.5 py-0.5 text-[9px] font-semibold text-gold-200">
+                      RTB ${escapeHtml(group.rtb || '—')}
+                    </span>
+                    <span class="rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${paymentTone}">
+                      ${escapeHtml(payment || 'Pembayaran belum tercatat')}
+                    </span>
+                  </div>
+                  <p class="mt-0.5 truncate text-[10px] text-slate-400">
+                    ${escapeHtml(group.pemesan || jamaah[0]?.name || 'Pemesan belum tercatat')}
+                  </p>
+                  <p class="mt-0.5 text-[9.5px] text-slate-500">
+                    ${escapeHtml(group.packageName || 'Paket belum tercatat')}${
+                      group.departureLabel
+                        ? ` • ${escapeHtml(group.departureLabel)}`
+                        : ''
+                    }
+                  </p>
+                </div>
+                ${portalMarkup}
+              </div>
+              <div class="mt-2 space-y-1.5">
+                ${jamaah
+                  .slice(0, 6)
+                  .map(
+                    (person) => `
+                  <div class="flex min-w-0 flex-wrap items-start justify-between gap-1.5 rounded-lg border border-white/[0.045] bg-black/10 px-2 py-1.5">
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-[10.5px] font-semibold text-slate-200">${escapeHtml(
+                        person.name || 'Jamaah',
+                      )}</p>
+                      <div class="mt-1 flex flex-wrap gap-1">
+                        ${(Array.isArray(person.addons) ? person.addons : [])
+                          .slice(0, 8)
+                          .map((addon) => {
+                            const tone =
+                              addon.status === 'verified'
+                                ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200'
+                                : addon.status === 'pending'
+                                  ? 'border-amber-400/20 bg-amber-400/[0.08] text-amber-200'
+                                  : addon.status === 'unpaid'
+                                    ? 'border-red-400/20 bg-red-400/[0.08] text-red-200'
+                                    : 'border-white/10 bg-white/[0.04] text-slate-300';
+                            return `
+                              <span class="inline-flex flex-wrap items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] ${tone}">
+                                <span class="font-semibold">${escapeHtml(addon.item)}</span>
+                                ${
+                                  Number(addon.price || 0) > 0
+                                    ? `<span class="opacity-80">${escapeHtml(
+                                        addon.priceLabel || `Rp${Number(addon.price).toLocaleString('id-ID')}`,
+                                      )}</span>`
+                                    : ''
+                                }
+                                <span class="border-l border-current pl-1 opacity-70">${escapeHtml(
+                                  addon.statusLabel || addon.status || 'Add-on',
+                                )}</span>
+                              </span>
+                            `;
+                          })
+                          .join('')}
+                      </div>
+                    </div>
+                    <span class="flex-shrink-0 text-[10px] font-semibold text-gold-200">
+                      ${escapeHtml(
+                        person.totalPriceLabel ||
+                          `Rp${Number(person.totalPrice || 0).toLocaleString('id-ID')}`,
+                      )}
+                    </span>
+                  </div>
+                `,
+                  )
+                  .join('')}
+              </div>
+            </article>
+          `;
+        })
+        .join('')
+    : `
+      <div class="rounded-xl border border-white/[0.07] bg-white/[0.025] p-2.5">
+        <p class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-gold-300/90">
+          Rekap add-on per jenis
+        </p>
+        <div class="mt-1.5 flex flex-wrap gap-1">
+          ${items
+            .slice(0, 12)
+            .map(
+              (item) => `
+            <span class="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[9px] text-slate-300">
+              <span class="font-semibold">${escapeHtml(item.item)}</span>
+              <span class="text-gold-200">${Number(item.qty || 0).toLocaleString('id-ID')} qty</span>
+              <span class="opacity-70">${escapeHtml(item.revenueLabel || '')}</span>
+            </span>
+          `,
+            )
+            .join('')}
+        </div>
+      </div>
+    `;
+
+  return `
+    <div class="chat-addon-results mt-2.5" data-chat-addon-results>
+      <div class="mb-2 flex flex-wrap items-center justify-between gap-1.5">
+        <span class="inline-flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-gold-300/90">
+          <i data-lucide="gift" class="h-3 w-3"></i>
+          Add-on per batch
+        </span>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[9px] font-semibold text-gold-200">
+            ${badge}
+          </span>
+          <a href="${escapeAttr(moduleHref)}"
+            class="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium text-slate-400 transition-colors hover:border-gold-400/30 hover:text-gold-200">
+            <i data-lucide="arrow-up-right" class="h-2.5 w-2.5"></i>
+            Buka modul
+          </a>
+        </div>
+      </div>
+      <div class="space-y-2">${body}</div>
+      ${
+        payload.truncated
+          ? `<p class="mt-2 text-[9.5px] text-slate-500">
+              Menampilkan ${Number(payload.returned || groups.length).toLocaleString('id-ID')} dari
+              ${totalMatched.toLocaleString('id-ID')} add-on. Persempit dengan RTB, nama, atau kode order.
+            </p>`
+          : ''
+      }
+    </div>
+  `;
+}
+
 function renderChatJamaahResults(payload = null) {
   if (!payload || !Array.isArray(payload.items) || !payload.items.length) return '';
 
   const totalMatched = Number(payload.totalMatched || payload.items.length);
   const returned = Number(payload.returned || payload.items.length);
+  const groups = groupChatJamaahItems(payload.items);
 
   return `
     <div class="chat-jamaah-results mt-2.5" data-chat-jamaah-results>
@@ -1074,11 +1425,11 @@ function renderChatJamaahResults(payload = null) {
           Status dokumen jamaah
         </span>
         <span class="rounded-full border border-gold-500/20 bg-gold-500/[0.07] px-2 py-0.5 text-[9px] font-semibold text-gold-200">
-          ${totalMatched.toLocaleString('id-ID')} data
+          ${groups.length.toLocaleString('id-ID')} order • ${totalMatched.toLocaleString('id-ID')} data
         </span>
       </div>
-      <div class="space-y-2">
-        ${payload.items.map(renderChatJamaahCard).join('')}
+      <div class="chat-order-groups">
+        ${groups.map(renderChatOrderGroup).join('')}
       </div>
       ${payload.truncated ? `
         <p class="mt-2 text-[9.5px] text-slate-500">
@@ -1123,6 +1474,12 @@ function addMessage(text, type, meta = {}) {
       <div class="min-w-0 flex-1">
         <div class="mb-1 flex items-center gap-2.5">
           <span class="text-[11px] font-semibold text-slate-400">Rahmah AI</span>
+          <button type="button" data-polish-chat title="Rapihin kata jawaban ini dengan Rahmah Style"
+            aria-label="Rapihin kata jawaban ini dengan Rahmah Style"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-500 transition-colors hover:bg-gold-500/[0.08] hover:text-gold-300">
+            <i data-lucide="sparkles" class="h-3 w-3"></i>
+            <span class="hidden sm:inline">Rapihin Kata</span>
+          </button>
           <button type="button" data-copy title="Salin jawaban"
             class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-500 transition-colors hover:bg-gold-500/[0.08] hover:text-gold-300">
             <i data-lucide="copy" class="h-3 w-3"></i>
@@ -1133,6 +1490,7 @@ function addMessage(text, type, meta = {}) {
           ${renderMarkdown(text)}
         </div>
         ${renderChatJamaahResults(meta.jamaahResults)}
+        ${renderChatAddonResults(meta.addonResults)}
         <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
           ${meta.source ? renderSourceBadge(meta) : ''}
           ${meta.intent ? renderIntentBadge(meta) : ''}
@@ -1145,8 +1503,35 @@ function addMessage(text, type, meta = {}) {
 
   messagesContainer.appendChild(messageDiv);
   if (window.lucide) lucide.createIcons();
+  if (type !== 'user' && typeof window.OrderAccess?.hydrate === 'function') {
+    window.OrderAccess.hydrate(messageDiv);
+  }
   requestAnimationFrame(() => {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  });
+}
+
+// Rapihin Kata untuk balasan chat operasional
+function polishChatReply(button) {
+  const bubble = button.closest('.message-bubble');
+  const raw = String(bubble?.dataset.rawText || '').trim();
+  if (!raw) {
+    showToast('Info', 'Belum ada teks yang bisa dirapikan.', 'warning');
+    return;
+  }
+  if (!window.RahmahPolish) {
+    showToast(
+      'Error',
+      'Modal Rapihin Kata belum termuat. Muat ulang halaman.',
+      'error',
+    );
+    return;
+  }
+
+  window.RahmahPolish.open({
+    text: raw,
+    mode: 'chat',
+    subtitle: 'Balasan chat • Rahmah AI',
   });
 }
 

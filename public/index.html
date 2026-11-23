@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
+  <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rahmah Travel AI Console</title>
   <meta name="description" content="Executive AI console Rahmah Travel — real-time SGO jamaah & manifest intelligence">
@@ -401,7 +402,7 @@
     /* Isolasi tab view: atribut hidden selalu menang atas utility display. */
     #view-monitoring[hidden],
     #view-manifest[hidden],
-    #wa-modal[hidden] {
+    #view-worksheet[hidden] {
       display: none !important;
     }
 
@@ -528,11 +529,11 @@
     .doc-chip.is-process {
       border: 0;
       background: transparent;
-      color: #8B8580;
+      color: #A7F3D0;
     }
 
     .doc-chip.is-process .doc-mark {
-      color: #F59E0B;
+      color: #34D399;
     }
 
     .manifest-row {
@@ -609,11 +610,6 @@
 
     .manifest-note.is-missing {
       color: #FCA5A5;
-    }
-
-    .wa-draft {
-      min-height: 16rem;
-      line-height: 1.65;
     }
 
     .view-panel.view-enter {
@@ -1561,13 +1557,13 @@
     }
 
     .doc-chip.is-process {
-      border-color: rgba(245, 158, 11, 0.18);
-      background: rgba(245, 158, 11, 0.07);
-      color: #FDE68A;
+      border-color: rgba(52, 211, 153, 0.18);
+      background: rgba(52, 211, 153, 0.055);
+      color: #A7F3D0;
     }
 
     .doc-chip.is-process .doc-mark {
-      color: #F59E0B;
+      color: #34D399;
     }
 
     #manifest-list {
@@ -1849,32 +1845,6 @@
       padding: 0 !important;
     }
 
-    /* WhatsApp modal — floating glass dialog */
-    #wa-modal {
-      background: rgba(4, 5, 8, 0.62);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-    }
-
-    #wa-modal:not([hidden]) {
-      display: flex;
-    }
-
-    #wa-modal > div {
-      background: linear-gradient(160deg, rgba(28, 30, 37, 0.92), rgba(14, 15, 20, 0.88));
-      border: 1px solid rgba(255, 255, 255, 0.11);
-      border-radius: 1.6rem;
-      box-shadow: 0 40px 110px -50px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-      backdrop-filter: blur(28px) saturate(135%);
-      -webkit-backdrop-filter: blur(28px) saturate(135%);
-    }
-
-    .wa-draft {
-      background: rgba(255, 255, 255, 0.035);
-      min-height: 16rem;
-      line-height: 1.7;
-    }
-
     @media (max-width: 1023px) {
       .stat-label {
         font-size: 0.56rem;
@@ -1907,7 +1877,270 @@
       }
     }
 
+    /* ---------------------------------------------------------------- */
+    /* Header order bersama: chat AI Console & Worksheet                */
+    /* ---------------------------------------------------------------- */
+    .order-result-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.7rem 1rem;
+      padding: 0.78rem 0.9rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+      background:
+        radial-gradient(120% 160% at 0% 0%, rgba(245, 158, 11, 0.10), transparent 58%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
+    }
+
+    .order-result-identity {
+      min-width: 0;
+      flex: 1 1 12rem;
+    }
+
+    .order-result-kicker {
+      display: block;
+      font-size: 0.5rem;
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #8a92a0;
+    }
+
+    .order-result-name {
+      margin-top: 0.22rem;
+      overflow-wrap: anywhere;
+      font-family: "Plus Jakarta Sans", "Inter", sans-serif;
+      font-size: 0.94rem;
+      font-weight: 700;
+      line-height: 1.3;
+      letter-spacing: -0.012em;
+      color: #f8fafc;
+    }
+
+    .order-result-meta {
+      display: flex;
+      min-width: 0;
+      flex: 0 1 auto;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.32rem;
+    }
+
+    .order-chip,
+    .order-portal-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      min-height: 1.55rem;
+      padding: 0.28rem 0.5rem;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 0.5rem;
+      background: rgba(255, 255, 255, 0.035);
+      font-size: 0.62rem;
+      font-weight: 600;
+      line-height: 1.15;
+      white-space: nowrap;
+      color: #cbd5e1;
+      text-decoration: none;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .order-chip i,
+    .order-chip svg,
+    .order-portal-link i,
+    .order-portal-link svg {
+      width: 0.72rem;
+      height: 0.72rem;
+      flex-shrink: 0;
+    }
+
+    .order-chip--code {
+      border-color: rgba(255, 255, 255, 0.095);
+      color: #d7dde7;
+    }
+
+    .order-chip--access {
+      border-color: rgba(245, 158, 11, 0.26);
+      background: rgba(245, 158, 11, 0.085);
+      color: #fde68a;
+    }
+
+    .order-chip--access.is-loading {
+      color: rgba(253, 230, 138, 0.7);
+    }
+
+    .order-chip--access.is-loading .order-access-value {
+      animation: order-access-pulse 1.2s ease-in-out infinite;
+    }
+
+    .order-chip--access.is-missing {
+      border-color: rgba(255, 255, 255, 0.07);
+      background: rgba(255, 255, 255, 0.025);
+      color: #7d8593;
+    }
+
+    .order-access-value {
+      letter-spacing: 0.075em;
+    }
+
+    @keyframes order-access-pulse {
+      0%,
+      100% {
+        opacity: 0.48;
+      }
+
+      50% {
+        opacity: 1;
+      }
+    }
+
+    .order-chip--count {
+      border-color: rgba(147, 197, 253, 0.17);
+      background: rgba(147, 197, 253, 0.06);
+      color: #bfdbfe;
+    }
+
+    .order-portal-link {
+      border-color: rgba(245, 158, 11, 0.32);
+      background: linear-gradient(
+        180deg,
+        rgba(245, 158, 11, 0.18),
+        rgba(245, 158, 11, 0.075)
+      );
+      font-weight: 700;
+      color: #fde68a;
+      transition:
+        border-color 0.18s ease,
+        background 0.18s ease,
+        color 0.18s ease;
+    }
+
+    .order-portal-link:hover {
+      border-color: rgba(252, 211, 77, 0.46);
+      background: linear-gradient(
+        180deg,
+        rgba(245, 158, 11, 0.26),
+        rgba(245, 158, 11, 0.12)
+      );
+      color: #fffbeb;
+    }
+
+    .order-portal-link:focus-visible,
+    .order-chip:focus-visible {
+      outline: 2px solid rgba(245, 158, 11, 0.6);
+      outline-offset: 2px;
+    }
+
+    .order-portal-link.is-disabled {
+      border-color: rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.025);
+      color: #6f7784;
+      cursor: not-allowed;
+    }
+
+    .order-portal-arrow {
+      opacity: 0.65;
+    }
+
+    .chat-order-groups {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .chat-order-group {
+      overflow: hidden;
+      border: 1px solid rgba(245, 158, 11, 0.15);
+      border-radius: 0.95rem;
+      background: linear-gradient(
+        165deg,
+        rgba(255, 255, 255, 0.026),
+        rgba(255, 255, 255, 0.008)
+      );
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+    }
+
+    .chat-order-group__body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.42rem;
+      min-width: 0;
+      padding: 0.52rem 0.62rem 0.6rem;
+    }
+
+    .chat-order-group .chat-jamaah-card {
+      min-width: 0;
+      padding: 0.68rem 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.055);
+      border-radius: 0.7rem;
+      background: rgba(0, 0, 0, 0.12);
+      box-shadow: none;
+    }
+
+    .chat-order-group .chat-jamaah-card:hover {
+      border-color: rgba(245, 158, 11, 0.17);
+      background: rgba(255, 255, 255, 0.028);
+      box-shadow: none;
+      transform: none;
+    }
+
+    @media (max-width: 640px) {
+      .order-result-head {
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        padding: 0.7rem 0.72rem;
+      }
+
+      .order-result-identity {
+        flex: 0 0 auto;
+        width: 100%;
+      }
+
+      .order-result-name {
+        font-size: 0.9rem;
+      }
+
+      .order-result-meta {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .order-chip,
+      .order-portal-link {
+        min-height: 1.45rem;
+        padding: 0.25rem 0.44rem;
+        font-size: 0.58rem;
+      }
+
+      .chat-order-group__body {
+        padding: 0.45rem;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .order-chip--access.is-loading .order-access-value {
+        animation: none;
+      }
+    }
+
   </style>
+
+  <!-- Worksheet Perlengkapan (Logistik & Stock) -->
+  <link rel="stylesheet" href="/css/worksheet.css">
+  <!-- FU Pelunasan (Penagihan Aging RED) -->
+  <link rel="stylesheet" href="/css/fu-pelunasan.css">
+  <!-- Upload Manifest (FU Dokumen per bulan keberangkatan) -->
+  <link rel="stylesheet" href="/css/manifest.css">
+  <link rel="stylesheet" href="/css/sync-progress.css">
+  <!-- Add-on Per Batch (rekap & rincian add-on SGO) -->
+  <link rel="stylesheet" href="/css/addon-per-batch.css">
+  <!-- Rapihin Kata (Rahmah Style) -->
+  <link rel="stylesheet" href="/css/rahmah-polish.css">
+  <link rel="stylesheet" href="/css/sgo-cookie.css">
 </head>
 
 <body class="relative font-sans h-screen overflow-hidden flex flex-col text-slate-100 antialiased">
@@ -1940,6 +2173,13 @@
     </div>
 
     <div class="flex flex-shrink-0 items-center gap-2">
+      <button id="sgo-cookie-btn" type="button" data-state="unknown"
+        aria-haspopup="dialog" aria-controls="sgo-cookie-modal"
+        title="Atur Cookie SGO perangkat ini">
+        <span class="sgo-cookie-dot" aria-hidden="true"></span>
+        <span class="sgo-cookie-label">Cookie SGO</span>
+        <span id="sgo-cookie-state" class="sgo-cookie-state">Memuat</span>
+      </button>
       <div id="top-view-switch" class="view-switch flex items-center gap-0.5" role="tablist"
         aria-label="Pilih modul utama">
         <button type="button" data-view-path="/ops/monitoring-jamaah" role="tab" aria-selected="true"
@@ -1953,6 +2193,24 @@
           class="view-switch-btn">
           <i data-lucide="file-check-2" class="h-3 w-3"></i>
           <span class="hidden md:inline">Manifest</span>
+        </button>
+        <button type="button" data-view-path="/ops/worksheet-perlengkapan" role="tab" aria-selected="false"
+          id="tab-worksheet" aria-controls="view-worksheet" aria-label="Worksheet Perlengkapan" title="Worksheet Perlengkapan"
+          class="view-switch-btn">
+          <i data-lucide="clipboard-list" class="h-3 w-3"></i>
+          <span class="hidden md:inline">Worksheet</span>
+        </button>
+        <button type="button" data-view-path="/ops/fu-pelunasan" role="tab" aria-selected="false"
+          id="tab-fu-pelunasan" aria-controls="view-fu-pelunasan" aria-label="FU Pelunasan" title="FU Pelunasan"
+          class="view-switch-btn">
+          <i data-lucide="wallet" class="h-3 w-3"></i>
+          <span class="hidden md:inline">FU</span>
+        </button>
+        <button type="button" data-view-path="/ops/add-on" role="tab" aria-selected="false"
+          id="tab-add-on" aria-controls="view-add-on" aria-label="Add-on Per Batch" title="Add-on Per Batch"
+          class="view-switch-btn">
+          <i data-lucide="gift" class="h-3 w-3"></i>
+          <span class="hidden md:inline">Add-on</span>
         </button>
       </div>
 
@@ -2008,7 +2266,7 @@
           </button>
         </div>
         <p class="mt-3.5 text-[11px] leading-relaxed text-slate-500">
-          Executive operations untuk monitoring jamaah & manifest SGO.
+          Executive operations untuk monitoring jamaah, manifest & worksheet SGO.
         </p>
       </div>
 
@@ -2017,7 +2275,7 @@
         <!-- Main menu -->
         <div class="flex items-center justify-between px-2">
           <p class="nav-eyebrow">Menu Utama</p>
-          <span class="text-[9px] font-medium uppercase tracking-wider text-slate-600">2 modul</span>
+          <span class="text-[9px] font-medium uppercase tracking-wider text-slate-600">5 modul</span>
         </div>
 
         <nav class="space-y-1" aria-label="Menu modul SGO">
@@ -2059,9 +2317,66 @@
               </div>
             </div>
           </button>
-        </nav>
 
-        <!-- Manifest dropzone dipindahkan ke view Upload Manifest. -->
+          <button type="button" data-module-path="/ops/worksheet-perlengkapan" aria-pressed="false"
+            class="module-nav group w-full p-3 text-left">
+            <div class="flex items-start gap-2.5">
+              <div class="nav-icon">
+                <i data-lucide="clipboard-list" class="h-4 w-4"></i>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-[12.5px] font-semibold text-slate-100">Worksheet Perlengkapan</span>
+                </div>
+                <p class="mt-0.5 text-[10.5px] leading-snug text-slate-500">Pemesan, jamaah, RTB & ukuran jaket</p>
+                <div class="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-500">
+                  <i data-lucide="database" class="h-3 w-3 flex-shrink-0 text-slate-600"></i>
+                  <span class="truncate">Cache SQLite • SGO Admin</span>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" data-module-path="/ops/fu-pelunasan" aria-pressed="false"
+            class="module-nav group w-full p-3 text-left">
+            <div class="flex items-start gap-2.5">
+              <div class="nav-icon">
+                <i data-lucide="wallet" class="h-4 w-4"></i>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-[12.5px] font-semibold text-slate-100">FU Pelunasan</span>
+                  <span id="fu-sidebar-count" class="fu-nav-badge flex-shrink-0">RED</span>
+                </div>
+                <p class="mt-0.5 text-[10.5px] leading-snug text-slate-500">Tagihan aging RED & template WhatsApp</p>
+                <div class="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-500">
+                  <i data-lucide="database" class="h-3 w-3 flex-shrink-0 text-slate-600"></i>
+                  <span class="truncate">Cache SQLite • SGO Penagihan</span>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button type="button" data-module-path="/ops/add-on" aria-pressed="false"
+            class="module-nav group w-full p-3 text-left">
+            <div class="flex items-start gap-2.5">
+              <div class="nav-icon">
+                <i data-lucide="gift" class="h-4 w-4"></i>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-[12.5px] font-semibold text-slate-100">Add-on Per Batch</span>
+                  <span id="addon-sidebar-count" class="ad-nav-badge flex-shrink-0">—</span>
+                </div>
+                <p class="mt-0.5 text-[10.5px] leading-snug text-slate-500">Rekap add-on, RTB, pemesan & jamaah</p>
+                <div class="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-500">
+                  <i data-lucide="database" class="h-3 w-3 flex-shrink-0 text-slate-600"></i>
+                  <span class="truncate">Cache SQLite • SGO Add-on</span>
+                </div>
+              </div>
+            </div>
+          </button>
+        </nav>
 
         <!-- Sync module -->
         <section class="sidebar-rule pt-4">
@@ -2082,6 +2397,9 @@
           <select id="moduleSelect" class="sr-only" tabindex="-1" aria-hidden="true">
             <option value="/ops/monitoring-jamaah">Monitoring Jamaah</option>
             <option value="/ops/upload-documents">Upload Manifest</option>
+            <option value="/ops/worksheet-perlengkapan">Worksheet Perlengkapan</option>
+            <option value="/ops/fu-pelunasan">FU Pelunasan</option>
+            <option value="/ops/add-on">Add-on Per Batch</option>
           </select>
 
           <button id="jamaah-cookie-btn" type="button"
@@ -2090,16 +2408,19 @@
             <span>Sinkronkan Monitoring Jamaah</span>
           </button>
 
-          <div id="sgo-scrape-progress" class="mt-3 hidden space-y-2">
-            <div class="flex items-center justify-between text-[10px] text-slate-500">
-              <span id="sgo-scrape-status">Memproses...</span>
-              <span id="sgo-scrape-count">[0/1]</span>
+          <div id="sgo-scrape-progress" class="sync-progress hidden mt-3" data-sync-panel
+            role="status" aria-live="polite" aria-atomic="false">
+            <div class="sync-progress__head">
+              <span class="sync-progress__label" data-sync-label>Sinkronisasi SGO</span>
+              <span class="sync-progress__percent" data-sync-percent>0%</span>
             </div>
-            <div class="h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
-              <div id="sgo-scrape-bar"
-                class="h-full rounded-full bg-gold-500 transition-all duration-500"
-                style="width: 0%"></div>
+            <div class="sync-progress__track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+              aria-label="Progress sinkronisasi SGO">
+              <span class="sync-progress__bar" data-sync-bar></span>
             </div>
+            <p class="sync-progress__message" data-sync-message>Menyiapkan sinkronisasi...</p>
+            <p class="sync-progress__detail" data-sync-detail></p>
+            <div class="sync-progress__summary" data-sync-summary hidden></div>
           </div>
 
           <div class="mt-3 flex items-center justify-between gap-2 border-t border-white/[0.04] pt-3">
@@ -2114,30 +2435,25 @@
           </div>
         </section>
 
-        <!-- Connection (advanced, collapsed) -->
-        <details class="sidebar-rule group">
-          <summary class="flex items-center justify-between gap-3 py-3">
-            <div class="flex items-center gap-2.5">
-              <div class="flex h-7 w-7 items-center justify-center text-slate-500">
-                <i data-lucide="plug" class="h-3.5 w-3.5"></i>
-              </div>
-              <div>
-                <p class="text-[12px] font-semibold text-slate-300">Koneksi SGO</p>
-                <p class="text-[10px] text-slate-600">Opsional • otomatis dari .env</p>
-              </div>
+        <!-- Connection -->
+        <section class="sidebar-rule py-4">
+          <div class="flex items-start gap-2.5">
+            <div class="flex h-7 w-7 flex-shrink-0 items-center justify-center text-slate-500">
+              <i data-lucide="shield-keyhole" class="h-3.5 w-3.5"></i>
             </div>
-            <i data-lucide="chevron-down" class="details-chevron h-3.5 w-3.5 text-slate-600"></i>
-          </summary>
-          <div class="space-y-2 pb-4 pt-1">
-            <label for="jamaah-cookie-url" class="nav-eyebrow">Base URL</label>
-            <input id="jamaah-cookie-url" type="url" placeholder="https://sgo.rahmahgrup.id"
-              class="field">
-            <label for="jamaah-cookie-str" class="nav-eyebrow pt-1">Session cookie</label>
-            <textarea id="jamaah-cookie-str" rows="2" placeholder="sgo_admin_session=... (kosong = .env)"
-              class="field resize-none font-mono text-[11px]"></textarea>
-            <p class="text-[10px] leading-relaxed text-slate-600">Kosongkan untuk memakai konfigurasi aman dari server.</p>
+            <div class="min-w-0 flex-1">
+              <p class="text-[12px] font-semibold text-slate-300">Koneksi SGO</p>
+              <p class="mt-0.5 text-[10px] leading-relaxed text-slate-500">Cookie SGO disimpan per perangkat/browser. Setiap laptop memakai cookie sendiri.</p>
+              <p id="jamaah-cookie-sidebar-state" data-state="unknown" class="mt-2">Status: Memuat...</p>
+              <button id="jamaah-cookie-open" type="button"
+                class="btn-ghost mt-3 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium">
+                <i data-lucide="cookie" class="h-3.5 w-3.5"></i>
+                <span>Atur Cookie SGO</span>
+              </button>
+              <p class="sgo-cookie-sidebar-note mt-2">Tempel, simpan, tes, atau reset cookie dari tombol Cookie SGO di header.</p>
+            </div>
           </div>
-        </details>
+        </section>
 
         <!-- Website context (optional, collapsed) -->
         <details class="sidebar-rule group">
@@ -2292,6 +2608,21 @@
                 <p id="monitoring-orders" class="stat-value">—</p>
               </div>
             </div>
+
+            <div id="monitoring-sync-progress" class="sync-progress hidden mt-3" data-sync-panel
+              role="status" aria-live="polite" aria-atomic="false">
+              <div class="sync-progress__head">
+                <span class="sync-progress__label" data-sync-label>Monitoring Jamaah</span>
+                <span class="sync-progress__percent" data-sync-percent>0%</span>
+              </div>
+              <div class="sync-progress__track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                aria-label="Progress sinkronisasi Monitoring Jamaah">
+                <span class="sync-progress__bar" data-sync-bar></span>
+              </div>
+              <p class="sync-progress__message" data-sync-message>Menyiapkan sinkronisasi...</p>
+              <p class="sync-progress__detail" data-sync-detail></p>
+              <div class="sync-progress__summary" data-sync-summary hidden></div>
+            </div>
           </div>
         </div>
 
@@ -2426,7 +2757,7 @@
                 Upload Manifest & Cek Dokumen
               </h2>
               <p class="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-slate-400">
-                Pantau kelengkapan KTP, KK, Foto, Paspor, dan Vaksin dari SGO. Generate draf WhatsApp
+                Pantau kelengkapan KTP, KK, Foto, Paspor, dan Vaksin dari SGO. Salin teks WhatsApp
                 formal untuk jamaah yang dokumennya belum lengkap.
               </p>
             </div>
@@ -2500,35 +2831,77 @@
 
             <div
               class="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 backdrop-blur-xl">
-              <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div class="relative flex-1">
-                  <i data-lucide="search"
-                    class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600"></i>
-                  <input id="manifest-search" type="search" autocomplete="off"
-                    placeholder="Cari nama, kode order, atau no HP..."
-                    class="field w-full pl-9 text-[12px]">
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <div id="manifest-filter" class="flex items-center gap-0.5">
-                    <button type="button" data-manifest-status="all" aria-pressed="true"
-                      class="manifest-filter-btn is-active">Semua</button>
-                    <button type="button" data-manifest-status="incomplete" aria-pressed="false"
-                      class="manifest-filter-btn">Belum Lengkap</button>
-                    <button type="button" data-manifest-status="complete" aria-pressed="false"
-                      class="manifest-filter-btn">Lengkap</button>
+              <div class="flex flex-col gap-3">
+                <div class="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
+                  <div class="relative min-w-0 flex-1">
+                    <i data-lucide="search"
+                      class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600"></i>
+                    <input id="manifest-search" type="search" autocomplete="off"
+                      placeholder="Cari nama, order, no HP, atau bulan (Januari / 2027-01)..."
+                      class="field w-full pl-9 text-[12px]">
                   </div>
-                  <button id="manifest-refresh" type="button"
-                    class="btn-ghost inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-medium">
-                    <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
-                    <span>Refresh</span>
-                  </button>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div id="manifest-month-shell">
+                      <i data-lucide="calendar-days" class="manifest-month-icon"></i>
+                      <label for="manifest-month" class="sr-only">Bulan dan tahun keberangkatan</label>
+                      <select id="manifest-month" aria-label="Filter bulan dan tahun keberangkatan">
+                        <option value="">Semua Bulan Keberangkatan</option>
+                      </select>
+                      <i data-lucide="chevron-down" class="manifest-month-chevron"></i>
+                    </div>
+                    <div id="manifest-filter" class="flex items-center gap-0.5">
+                      <button type="button" data-manifest-status="all" aria-pressed="true"
+                        class="manifest-filter-btn is-active">Semua</button>
+                      <button type="button" data-manifest-status="incomplete" aria-pressed="false"
+                        class="manifest-filter-btn">Missing</button>
+                      <button type="button" data-manifest-status="complete" aria-pressed="false"
+                        class="manifest-filter-btn">Lengkap</button>
+                    </div>
+                    <button id="manifest-refresh" type="button"
+                      title="Sinkronkan manifest dari SGO"
+                      aria-label="Sinkronkan manifest dari SGO"
+                      class="btn-ghost inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-medium">
+                      <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+                      <span>Sinkronkan</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div class="mt-2.5 flex flex-wrap items-center justify-between gap-2 px-0.5 text-[10px] text-slate-600">
-                <span id="manifest-result-meta" aria-live="polite">Memuat data manifest...</span>
-                <span id="manifest-page-meta" class="tabular-nums"></span>
+                <div class="flex flex-wrap items-center justify-between gap-2 px-0.5 text-[10px] text-slate-600">
+                  <span id="manifest-result-meta" aria-live="polite">Memuat data manifest...</span>
+                  <span id="manifest-page-meta" class="tabular-nums"></span>
+                </div>
               </div>
             </div>
+          </div>
+
+          <div id="manifest-sync-progress" class="sync-progress hidden mt-3" data-sync-panel
+            role="status" aria-live="polite" aria-atomic="false">
+            <div class="sync-progress__head">
+              <span class="sync-progress__label" data-sync-label>Upload Manifest</span>
+              <span class="sync-progress__percent" data-sync-percent>0%</span>
+            </div>
+            <div class="sync-progress__track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+              aria-label="Progress sinkronisasi Upload Manifest">
+              <span class="sync-progress__bar" data-sync-bar></span>
+            </div>
+            <p class="sync-progress__message" data-sync-message>Menyiapkan sinkronisasi...</p>
+            <p class="sync-progress__detail" data-sync-detail></p>
+            <div class="sync-progress__summary" data-sync-summary hidden></div>
+          </div>
+
+          <div class="manifest-docs-legend" aria-label="Legenda status dokumen">
+            <span class="doc-chip is-complete">
+              <span class="doc-mark" aria-hidden="true">✓</span>
+              <span>Terisi / terverifikasi</span>
+            </span>
+            <span class="doc-chip is-process">
+              <span class="doc-mark" aria-hidden="true">•</span>
+              <span>Terunggah, menunggu approval</span>
+            </span>
+            <span class="doc-chip is-missing">
+              <span class="doc-mark" aria-hidden="true">×</span>
+              <span>Belum ada</span>
+            </span>
           </div>
 
           <!-- Loading skeleton -->
@@ -2559,15 +2932,15 @@
           </div>
 
           <!-- Daftar jamaah -->
-          <div id="manifest-list" class="mt-4 hidden" aria-live="polite"></div>
+          <div id="manifest-list" class="manifest-grid mt-4 hidden" aria-live="polite"></div>
 
           <!-- Empty state -->
           <div id="manifest-empty" class="hidden py-14 text-center">
             <i data-lucide="search-x" class="mx-auto h-7 w-7 text-slate-600"></i>
             <p id="manifest-empty-title" class="mt-3 text-[13px] font-semibold text-slate-300">Tidak ada data yang
               cocok</p>
-            <p id="manifest-empty-text" class="mt-1 text-[11px] text-slate-500">Coba kata kunci nama, kode order, atau
-              nomor HP lain.</p>
+            <p id="manifest-empty-text" class="mt-1 text-[11px] text-slate-500">Coba pilih bulan lain, ubah status
+              dokumen, atau gunakan kata kunci nama / kode order.</p>
           </div>
 
           <!-- Pagination -->
@@ -2592,60 +2965,609 @@
           </div>
         </div>
       </section>
+
+      <!-- Worksheet Perlengkapan (Logistik & Stock) -->
+      <section id="view-worksheet" data-view="worksheet" hidden
+        class="view-panel flex min-h-0 flex-1 flex-col"
+        role="tabpanel" aria-labelledby="tab-worksheet" aria-label="Worksheet Perlengkapan">
+
+        <!-- Bar judul ringkas -->
+        <div class="px-3 pb-1 pt-4 sm:px-5 sm:pt-5">
+          <div class="mx-auto max-w-4xl">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex min-w-0 flex-1 items-baseline gap-2.5">
+                <h2 class="font-display flex-shrink-0 text-[14px] font-semibold tracking-tight text-slate-100">
+                  Worksheet Perlengkapan
+                </h2>
+                <span id="worksheet-source-chip" class="ws-source-chip">
+                  <span id="worksheet-source-dot" class="ws-dot is-loading"></span>
+                  <span id="worksheet-source-label" class="min-w-0 truncate">Memuat cache SQLite...</span>
+                </span>
+              </div>
+              <button id="worksheet-refresh" type="button"
+                class="btn-ghost inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-medium">
+                <i data-lucide="refresh-cw" class="h-3 w-3"></i>
+                <span class="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
+            <div id="worksheet-warning" class="ws-warning mt-2 hidden" role="status"></div>
+          </div>
+        </div>
+
+        <!-- Konsol chat -->
+        <div
+          class="mx-3 mb-3 mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.4rem] border border-white/10 bg-white/[0.02] backdrop-blur-xl sm:mx-5 sm:mb-5">
+
+          <!-- Chat Header -->
+          <div class="flex items-center justify-between gap-3 border-b border-white/[0.05] px-4 py-3 sm:px-6">
+            <div class="flex min-w-0 items-center gap-3">
+              <div class="relative flex-shrink-0">
+                <div class="brand-plate flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg">
+                  <img src="/assets/logo.png" alt="Rahmah Travel" class="h-full w-full object-contain p-0.5">
+                </div>
+                <span class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0B0C0F] bg-emerald-400"></span>
+              </div>
+              <div class="min-w-0">
+                <h2 class="font-display truncate text-[14px] font-semibold tracking-tight text-slate-100">
+                  Rahmah <span class="text-slate-400">AI Concierge</span>
+                </h2>
+                <p class="flex items-center gap-1.5 truncate text-[10.5px] text-slate-500">
+                  <span id="worksheet-status-dot" class="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                  <span id="worksheet-chat-status">Online • siap membantu</span>
+                </p>
+              </div>
+            </div>
+
+            <div class="flex flex-shrink-0 items-center gap-3">
+              <span class="hidden items-center gap-1.5 text-[10px] font-medium text-slate-500 sm:inline-flex">
+                <i data-lucide="database" class="h-3 w-3 text-slate-600"></i>
+                <span>Worksheet Perlengkapan</span>
+              </span>
+              <span class="hidden items-center gap-1.5 text-[10px] font-semibold text-gold-500/90 sm:inline-flex">
+                <i data-lucide="sparkles" class="h-3 w-3"></i>
+                AI Chat
+              </span>
+              <button id="worksheet-chat-clear" type="button"
+                title="Bersihkan percakapan"
+                class="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[10.5px] font-medium text-slate-500 transition-colors hover:bg-white/[0.035] hover:text-slate-200">
+                <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
+                <span class="hidden sm:inline">Bersihkan</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Thread percakapan -->
+          <div id="worksheet-messages"
+            class="chat-canvas flex-1 space-y-4 overflow-y-auto px-4 py-7 scroll-smooth sm:px-8 sm:py-10"
+            aria-live="polite" aria-label="Percakapan asisten perlengkapan">
+
+            <!-- Sambutan -->
+            <div id="worksheet-welcome" class="fade-in mx-auto max-w-3xl py-2 text-center sm:py-6">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Rahmah Logistics Console
+              </p>
+              <h3 class="font-display mt-3 text-[24px] font-semibold tracking-tight text-white sm:text-[28px]">
+                Assalamu'alaikum.
+              </h3>
+              <p class="mx-auto mt-3 max-w-xl text-[13px] leading-relaxed text-slate-400">
+                Saya asisten perlengkapan Rahmah Travel. Sebutkan kode order atau nama
+                jamaah, dan saya siapkan ringkasan logistiknya — dari pemesan, kontak,
+                paket, RTB, keberangkatan, sampai ukuran jaket.
+              </p>
+              <div class="mt-7 flex flex-wrap justify-center gap-x-6 gap-y-2.5 text-[11px] text-slate-500">
+                <span class="inline-flex items-center gap-1.5">
+                  <i data-lucide="database" class="h-3.5 w-3.5 text-slate-600"></i> Cache SQLite
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                  <i data-lucide="layers" class="h-3.5 w-3.5 text-slate-600"></i> Lintas tahap
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                  <i data-lucide="mouse-pointer-click" class="h-3.5 w-3.5 text-slate-600"></i> Aksi SGO
+                </span>
+              </div>
+              <p class="mt-8 text-[11px] text-slate-600">
+                Gunakan pintasan cepat di atas kolom pesan, lalu tekan Kirim.
+              </p>
+            </div>
+          </div>
+
+          <!-- Input Bar -->
+          <div class="border-t border-white/[0.05] px-4 pb-4 pt-3 sm:px-6 sm:pb-4">
+            <div class="mx-auto max-w-4xl">
+              <div id="worksheet-chat-prompts" class="mb-2 flex flex-wrap gap-1.5" aria-label="Pintasan pencarian">
+                <button type="button" data-ws-prompt="order"
+                  class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+                  <i data-lucide="hash" class="h-3 w-3"></i> Cek Kode Order
+                </button>
+                <button type="button" data-ws-prompt="jamaah"
+                  class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+                  <i data-lucide="users" class="h-3 w-3"></i> Cari Nama Jamaah
+                </button>
+                <button type="button" data-ws-prompt="size"
+                  class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+                  <i data-lucide="shirt" class="h-3 w-3"></i> Cek Ukuran Jaket
+                </button>
+                <button type="button" data-ws-prompt="package"
+                  class="chat-suggestion quick-action inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] font-medium">
+                  <i data-lucide="package" class="h-3 w-3"></i> Cek Paket Umroh
+                </button>
+              </div>
+
+              <div class="composer-shell flex items-end gap-2 rounded-xl p-2">
+                <div class="mb-0.5 hidden h-9 w-9 flex-shrink-0 items-center justify-center text-slate-600 sm:flex"
+                  aria-hidden="true">
+                  <i data-lucide="package-search" class="h-4 w-4"></i>
+                </div>
+                <label for="worksheet-chat-input" class="sr-only">Pesan untuk asisten perlengkapan</label>
+                <textarea id="worksheet-chat-input" rows="1" maxlength="200" autocomplete="off" spellcheck="false"
+                  placeholder="Ketik kode order, nama pemesan, atau nama jamaah..."
+                  class="flex-1 resize-none bg-transparent px-1 py-2 text-[13px] text-slate-100 placeholder:text-slate-600 focus:outline-none max-h-36"></textarea>
+                <button id="worksheet-chat-send" type="button" aria-label="Kirim pesan"
+                  class="btn-primary flex h-10 w-10 flex-shrink-0 items-center justify-center gap-2 rounded-lg px-0 text-[12px] font-semibold sm:w-auto sm:px-4">
+                  <i data-lucide="arrow-up" class="h-4 w-4"></i>
+                  <span class="hidden sm:inline">Kirim</span>
+                </button>
+              </div>
+
+              <div class="mt-2 flex items-center justify-between gap-3 text-[10px] text-slate-600">
+                <span>
+                  <kbd class="rounded border border-white/[0.07] bg-white/[0.025] px-1 py-0.5 font-sans text-[9px] text-slate-500">Enter</kbd> kirim
+                  <span class="text-slate-700">•</span>
+                  <kbd class="rounded border border-white/[0.07] bg-white/[0.025] px-1 py-0.5 font-sans text-[9px] text-slate-500">Shift+Enter</kbd> baris baru
+                </span>
+                <span id="worksheet-chat-count" class="tabular-nums">0/200</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FU Pelunasan (Penagihan Aging RED) -->
+      <section id="view-fu-pelunasan" data-view="fu-pelunasan" hidden
+        class="view-panel min-h-0 flex-1 overflow-y-auto"
+        role="tabpanel" aria-labelledby="tab-fu-pelunasan" aria-label="FU Pelunasan">
+        <div class="fu-shell mx-auto max-w-6xl px-3 pb-7 pt-4 sm:px-5 sm:pt-5">
+
+          <div class="fu-head">
+            <div class="fu-head__copy">
+              <p class="fu-kicker">Collection Desk</p>
+              <div class="fu-title-row">
+                <h2 class="font-display fu-title">FU Pelunasan</h2>
+                <span id="fu-source-chip" class="fu-source-chip">
+                  <span id="fu-source-dot" class="fu-dot is-loading"></span>
+                  <span id="fu-source-label" class="truncate">Memuat cache SQLite...</span>
+                </span>
+              </div>
+              <p class="fu-subtitle">
+                Follow-up penagihan aging SGO untuk jamaah berisiko
+                <span class="fu-subtitle-red">RED</span>. Salin template WhatsApp
+                personal, lalu kirim dari nomor resmi travel.
+              </p>
+            </div>
+            <button id="fu-refresh" type="button" class="fu-refresh">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <div id="fu-warning" class="fu-warning" role="status" hidden></div>
+
+          <div class="fu-stats">
+            <div class="fu-stat fu-stat--primary">
+              <div class="fu-stat__label">
+                <i data-lucide="wallet" class="h-3.5 w-3.5"></i>
+                Total Piutang RED
+              </div>
+              <p id="fu-total-piutang" class="fu-stat__value">—</p>
+              <p id="fu-total-piutang-sub" class="fu-stat__sub">Menunggu data SGO</p>
+            </div>
+            <div class="fu-stat">
+              <div class="fu-stat__label">
+                <i data-lucide="users" class="h-3.5 w-3.5"></i>
+                Jamaah RED
+              </div>
+              <p id="fu-total-jamaah" class="fu-stat__value">—</p>
+              <p id="fu-total-jamaah-sub" class="fu-stat__sub">Order perlu ditagih</p>
+            </div>
+            <div class="fu-stat">
+              <div class="fu-stat__label">
+                <i data-lucide="calendar-clock" class="h-3.5 w-3.5"></i>
+                Sudah Lewat H
+              </div>
+              <p id="fu-total-overdue" class="fu-stat__value fu-stat__value--red">—</p>
+              <p id="fu-total-overdue-sub" class="fu-stat__sub">Prioritas utama</p>
+            </div>
+            <div class="fu-stat">
+              <div class="fu-stat__label">
+                <i data-lucide="file-text" class="h-3.5 w-3.5"></i>
+                Invoice Tersedia
+              </div>
+              <p id="fu-total-invoice" class="fu-stat__value fu-stat__value--emerald">—</p>
+              <p id="fu-total-invoice-sub" class="fu-stat__sub">Siap dikirim</p>
+            </div>
+          </div>
+
+          <div class="fu-toolbar">
+            <div class="fu-search-wrap">
+              <i data-lucide="search" class="fu-search-icon"></i>
+              <label for="fu-search" class="sr-only">Cari jamaah FU Pelunasan</label>
+              <input id="fu-search" type="search" autocomplete="off" spellcheck="false"
+                class="fu-search"
+                placeholder="Cari nama, kode order, RTB, paket, atau nomor HP...">
+            </div>
+            <label for="fu-month" class="fu-month-wrap">
+              <i data-lucide="calendar-days" class="fu-month-icon"></i>
+              <span class="sr-only">Filter bulan keberangkatan</span>
+              <select id="fu-month" class="fu-month" aria-label="Filter bulan dan tahun keberangkatan">
+                <option value="all">Semua Bulan</option>
+              </select>
+              <i data-lucide="chevron-down" class="fu-month-chevron"></i>
+            </label>
+            <label for="fu-sort" class="fu-sort-wrap">
+              <i data-lucide="arrow-up-down" class="h-3.5 w-3.5"></i>
+              <span class="sr-only">Urutkan</span>
+              <select id="fu-sort" class="fu-sort">
+                <option value="urgency">Paling mendesak</option>
+                <option value="amount">Sisa terbesar</option>
+                <option value="name">Nama A–Z</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="fu-filters" class="fu-filters" role="group" aria-label="Filter status keberangkatan"></div>
+
+          <div class="fu-resultbar">
+            <p id="fu-result-meta" class="fu-result-meta">Menyiapkan data...</p>
+            <p id="fu-sync-meta" class="fu-sync-meta"></p>
+          </div>
+
+          <div id="fu-loading" class="fu-loading">
+            <span class="fu-spinner" aria-hidden="true"></span>
+            <p>Menarik data penagihan RED dari SGO...</p>
+          </div>
+
+          <div id="fu-error" class="fu-state fu-state--error" hidden>
+            <i data-lucide="triangle-alert" class="fu-state__icon h-6 w-6"></i>
+            <h3 id="fu-error-title" class="fu-state__title">Gagal memuat FU Pelunasan</h3>
+            <p id="fu-error-text" class="fu-state__text">Periksa sesi SGO Admin lalu coba lagi.</p>
+            <button id="fu-retry" type="button" class="fu-btn fu-btn--primary mt-4">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+              <span>Coba lagi</span>
+            </button>
+          </div>
+
+          <div id="fu-empty" class="fu-state" hidden>
+            <i data-lucide="inbox" class="fu-state__icon h-6 w-6"></i>
+            <h3 id="fu-empty-title" class="fu-state__title">Tidak ada jamaah yang cocok</h3>
+            <p id="fu-empty-text" class="fu-state__text">Coba kata kunci lain, ganti bulan keberangkatan, atau ubah filter status H.</p>
+          </div>
+
+          <div id="fu-list" class="fu-grid" aria-live="polite"></div>
+
+          <div class="fu-footnote">
+            <i data-lucide="shield-check" class="h-3.5 w-3.5"></i>
+            <p>
+              Sumber resmi SGO Admin • Penagihan &amp; Aging risiko RED.
+              Template WhatsApp hanya disalin ke clipboard; tidak ada pesan yang dikirim otomatis.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Add-on Per Batch (rekap & rincian add-on SGO) -->
+      <section id="view-add-on" data-view="add-on" hidden
+        class="view-panel min-h-0 flex-1 overflow-y-auto"
+        role="tabpanel" aria-labelledby="tab-add-on" aria-label="Add-on Per Batch">
+        <div class="ad-shell mx-auto max-w-6xl px-3 pb-7 pt-4 sm:px-5 sm:pt-5">
+
+          <div class="ad-head">
+            <div class="ad-head__copy">
+              <p class="ad-kicker">Add-on Desk</p>
+              <div class="ad-title-row">
+                <h2 class="font-display ad-title">Add-on Per Batch</h2>
+                <span id="addon-source-chip" class="ad-source-chip">
+                  <span id="addon-source-dot" class="ad-dot is-loading"></span>
+                  <span id="addon-source-label" class="truncate">Memuat cache SQLite...</span>
+                </span>
+              </div>
+              <p class="ad-subtitle">
+                Rekap add-on per jenis, pencarian cepat RTB / nama / kode order,
+                serta rincian jamaah per batch dari SGO Admin.
+              </p>
+            </div>
+            <button id="addon-sync-btn" type="button" class="ad-sync-btn">
+              <i id="addon-sync-icon" data-lucide="refresh-cw" class="ad-sync-icon h-3.5 w-3.5"></i>
+              <span>Sinkronkan Add-on</span>
+            </button>
+          </div>
+
+          <div id="addon-warning" class="ad-warning" role="status" hidden></div>
+
+          <div id="addon-progress" class="ad-progress" role="status" aria-live="polite" aria-atomic="false" hidden>
+            <div class="ad-progress__head">
+              <span class="ad-progress__title">
+                <i data-lucide="loader-2" class="h-3.5 w-3.5"></i>
+                <span id="addon-progress-title">Menyiapkan sinkronisasi Add-on...</span>
+              </span>
+              <span id="addon-progress-percent" class="ad-progress__percent">0%</span>
+            </div>
+            <div id="addon-progress-track" class="ad-progress__bar" role="progressbar" aria-valuemin="0"
+              aria-valuemax="100" aria-valuenow="0" aria-label="Progress sinkronisasi Add-on">
+              <span id="addon-progress-bar" class="ad-progress__fill"></span>
+            </div>
+            <p id="addon-progress-detail" class="ad-progress__detail"></p>
+          </div>
+
+          <div class="ad-stats">
+            <div class="ad-stat ad-stat--primary">
+              <div class="ad-stat__label">
+                <i data-lucide="package" class="h-3.5 w-3.5"></i>
+                Total Add-on
+              </div>
+              <p id="addon-stat-qty" class="ad-stat__value is-gold">—</p>
+              <p id="addon-stat-qty-sub" class="ad-stat__sub">Menunggu data SGO</p>
+            </div>
+            <div class="ad-stat">
+              <div class="ad-stat__label">
+                <i data-lucide="badge-check" class="h-3.5 w-3.5"></i>
+                Berbayar
+              </div>
+              <p id="addon-stat-paid" class="ad-stat__value is-green">—</p>
+              <p id="addon-stat-paid-sub" class="ad-stat__sub">Add-on sudah dibayar</p>
+            </div>
+            <div class="ad-stat">
+              <div class="ad-stat__label">
+                <i data-lucide="gift" class="h-3.5 w-3.5"></i>
+                Gratis
+              </div>
+              <p id="addon-stat-free" class="ad-stat__value">—</p>
+              <p id="addon-stat-free-sub" class="ad-stat__sub">Tanpa biaya tambahan</p>
+            </div>
+            <div class="ad-stat">
+              <div class="ad-stat__label">
+                <i data-lucide="wallet" class="h-3.5 w-3.5"></i>
+                Pendapatan
+              </div>
+              <p id="addon-stat-revenue" class="ad-stat__value is-gold">—</p>
+              <p id="addon-stat-revenue-sub" class="ad-stat__sub">Total add-on berbayar</p>
+            </div>
+          </div>
+
+          <div class="ad-toolbar">
+            <div class="ad-search-wrap">
+              <i data-lucide="search" class="ad-search-icon h-3.5 w-3.5"></i>
+              <label for="addon-search" class="sr-only">Cari RTB, nama, kode order, atau add-on</label>
+              <input id="addon-search" type="search" autocomplete="off" spellcheck="false" class="ad-search"
+                placeholder="Ketik RTB (contoh 314), nama jamaah, kode order, atau jenis add-on...">
+              <button id="addon-search-clear" type="button" class="ad-search-clear" aria-label="Hapus pencarian"
+                title="Hapus pencarian" hidden>
+                <i data-lucide="x" class="h-3 w-3"></i>
+              </button>
+            </div>
+
+            <label for="addon-item-filter" class="ad-select-wrap">
+              <i data-lucide="gift" class="h-3.5 w-3.5"></i>
+              <span class="sr-only">Filter jenis add-on</span>
+              <select id="addon-item-filter" class="ad-select">
+                <option value="">Semua jenis add-on</option>
+              </select>
+            </label>
+
+            <label for="addon-status-filter" class="ad-select-wrap">
+              <i data-lucide="badge-check" class="h-3.5 w-3.5"></i>
+              <span class="sr-only">Filter status add-on</span>
+              <select id="addon-status-filter" class="ad-select">
+                <option value="all">Semua status</option>
+                <option value="verified">Terverifikasi</option>
+                <option value="pending">Menunggu verifikasi</option>
+                <option value="unpaid">Belum bayar</option>
+                <option value="free">Gratis</option>
+              </select>
+            </label>
+
+            <label for="addon-sort" class="ad-select-wrap">
+              <i data-lucide="arrow-up-down" class="h-3.5 w-3.5"></i>
+              <span class="sr-only">Urutkan data</span>
+              <select id="addon-sort" class="ad-select">
+                <option value="rtb-desc">RTB tertinggi</option>
+                <option value="revenue">Pendapatan tertinggi</option>
+                <option value="qty">Qty terbesar</option>
+                <option value="departure">Keberangkatan terdekat</option>
+              </select>
+            </label>
+
+            <button id="addon-reset" type="button" class="ad-clear-btn" title="Reset semua filter">
+              <i data-lucide="rotate-ccw" class="h-3.5 w-3.5"></i>
+              <span>Reset</span>
+            </button>
+          </div>
+
+          <div class="ad-resultbar">
+            <p id="addon-result-meta" class="ad-result-meta">Menyiapkan data...</p>
+            <p id="addon-sync-meta" class="ad-sync-meta"></p>
+          </div>
+
+          <div id="addon-loading" class="ad-state" role="status" aria-live="polite">
+            <span class="ad-spinner" aria-hidden="true"></span>
+            <p class="ad-state__text">Menarik rekap Add-on dari cache SQLite...</p>
+          </div>
+
+          <div id="addon-error" class="ad-state ad-state--error" hidden role="alert">
+            <i data-lucide="triangle-alert" class="ad-state__icon h-6 w-6"></i>
+            <h3 class="ad-state__title">Gagal memuat Add-on Per Batch</h3>
+            <p id="addon-error-text" class="ad-state__text">Periksa sesi SGO Admin lalu coba lagi.</p>
+            <button id="addon-retry" type="button" class="ad-retry-btn">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+              <span>Coba lagi</span>
+            </button>
+          </div>
+
+          <div id="addon-empty" class="ad-state" hidden>
+            <i data-lucide="inbox" class="ad-state__icon h-6 w-6"></i>
+            <h3 id="addon-empty-title" class="ad-state__title">Belum ada data Add-on</h3>
+            <p id="addon-empty-text" class="ad-state__text">
+              Klik Sinkronkan Add-on untuk menarik rekap add-on dari SGO Admin.
+            </p>
+            <button id="addon-empty-sync" type="button" class="ad-retry-btn">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+              <span>Sinkronkan sekarang</span>
+            </button>
+          </div>
+
+          <div id="addon-recap-section" class="ad-section" hidden>
+            <div class="ad-section-head">
+              <h3 id="addon-recap-title" class="ad-section-title">Rekap add-on <span>per jenis</span></h3>
+              <p id="addon-recap-meta" class="ad-section-meta"></p>
+            </div>
+            <div id="addon-recap-grid" class="ad-recap-grid"></div>
+          </div>
+
+          <div id="addon-batch-section" class="ad-section" hidden>
+            <div class="ad-section-head">
+              <h3 id="addon-batch-title" class="ad-section-title">Daftar <span>batch RTB</span></h3>
+              <p id="addon-batch-meta" class="ad-section-meta"></p>
+            </div>
+            <div id="addon-batch-grid" class="ad-batch-grid"></div>
+          </div>
+
+          <div id="addon-detail-section" class="ad-section" hidden>
+            <div class="ad-detail-head">
+              <div class="min-w-0">
+                <h3 id="addon-detail-title" class="ad-detail-title">Rincian add-on</h3>
+                <p id="addon-detail-subtitle" class="ad-detail-subtitle"></p>
+              </div>
+              <button id="addon-detail-back" type="button" class="ad-back-btn">
+                <i data-lucide="arrow-left" class="h-3 w-3"></i>
+                <span>Semua batch</span>
+              </button>
+            </div>
+            <div id="addon-group-list" class="ad-group-list" aria-live="polite"></div>
+          </div>
+
+          <div class="ad-footnote">
+            <i data-lucide="shield-check" class="h-3.5 w-3.5"></i>
+            <p>
+              Sumber resmi SGO Admin • Add-on Per Batch. Rekap qty dan pendapatan mengikuti
+              halaman rekap SGO; rincian jamaah mengikuti export per jenis add-on dan export RTB.
+              Sebagian jenis add-on tidak menyertakan rincian jamaah di export SGO.
+            </p>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
-  <!-- WhatsApp Draft Modal -->
-  <div id="wa-modal" hidden
-    class="fixed inset-0 z-[90] items-center justify-center p-4 sm:p-6"
-    role="dialog" aria-modal="true" aria-labelledby="wa-modal-title" aria-hidden="true">
-    <div class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[1.6rem] border border-white/10">
-      <div class="flex items-start justify-between gap-3 border-b border-white/[0.07] px-5 py-4">
+  <div id="sgo-cookie-modal" hidden
+    class="fixed inset-0 z-[95] hidden items-center justify-center p-3 sm:p-6"
+    role="dialog" aria-modal="true" aria-labelledby="sgo-cookie-title" aria-hidden="true">
+    <div id="sgo-cookie-backdrop" class="sgo-cookie-backdrop absolute inset-0"></div>
+    <div class="sgo-cookie-panel relative flex w-full max-w-xl flex-col overflow-hidden">
+      <header class="sgo-cookie-head">
         <div class="flex min-w-0 items-center gap-3">
-          <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center text-emerald-400">
-            <i data-lucide="message-circle" class="h-4 w-4"></i>
-          </div>
+          <span class="sgo-cookie-mark" aria-hidden="true">
+            <i data-lucide="shield-keyhole" class="h-4 w-4"></i>
+          </span>
           <div class="min-w-0">
-            <h2 id="wa-modal-title" class="font-display truncate text-[14px] font-semibold text-white">Draf Pesan
-              WhatsApp</h2>
-            <p id="wa-recipient" class="mt-0.5 truncate text-[10.5px] text-slate-500">—</p>
+            <p class="sgo-cookie-kicker">Perangkat ini</p>
+            <h2 id="sgo-cookie-title" class="sgo-cookie-title">Cookie SGO</h2>
           </div>
         </div>
-        <button id="wa-close-btn" type="button" aria-label="Tutup draf"
-          class="flex-shrink-0 rounded-md p-1.5 text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-slate-200">
+        <button id="sgo-cookie-close" type="button" aria-label="Tutup pengaturan cookie SGO"
+          class="sgo-cookie-close">
           <i data-lucide="x" class="h-4 w-4"></i>
         </button>
-      </div>
-
-      <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-        <label for="wa-draft-text" class="nav-eyebrow">Pesan siap kirim</label>
-        <textarea id="wa-draft-text" readonly rows="14"
-          class="field wa-draft mt-2 w-full resize-none font-mono text-[11.5px]"></textarea>
-        <p class="mt-2 text-[10px] leading-relaxed text-slate-600">
-          Periksa kembali draf sebelum dikirim. Rahmah Travel tidak mengirim pesan secara otomatis.
-        </p>
-      </div>
-
-      <div class="flex items-center justify-between gap-2 border-t border-white/[0.07] px-4 py-3 sm:px-5">
-        <span id="wa-copy-status" class="text-[10px] text-slate-500"></span>
-        <div class="flex flex-shrink-0 items-center gap-2">
-          <button id="wa-close-btn-footer" type="button"
-            class="btn-ghost inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10.5px] font-medium">
-            Tutup
-          </button>
-          <button id="wa-copy-btn" type="button"
-            class="btn-primary inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[10.5px] font-semibold">
-            <i data-lucide="copy" class="h-3.5 w-3.5"></i>
-            <span>Copy Text</span>
-          </button>
+      </header>
+      <div class="sgo-cookie-body">
+        <div id="sgo-cookie-modal-state" class="sgo-cookie-status" data-state="unknown">
+          <span class="sgo-cookie-dot" aria-hidden="true"></span>
+          <div class="min-w-0">
+            <p id="sgo-cookie-status-title" class="sgo-cookie-status-title">Memeriksa cookie SGO</p>
+            <p id="sgo-cookie-status-detail" class="sgo-cookie-status-detail">Status cookie perangkat sedang diperiksa.</p>
+          </div>
+        </div>
+        <div>
+          <label for="sgo-cookie-input" class="sgo-cookie-label">Tempel cookie SGO</label>
+          <textarea id="sgo-cookie-input" rows="4" spellcheck="false" autocomplete="off"
+            class="sgo-cookie-input"
+            placeholder="sgo_admin_session=..."></textarea>
+          <p class="sgo-cookie-hint">Gunakan cookie dari akun SGO Admin Anda. Format yang diterima: <code>sgo_admin_session=...</code> atau token sesi saja. Nilai cookie tersimpan di browser ini dan tidak ditampilkan ulang setelah disimpan.</p>
+        </div>
+        <ol class="sgo-cookie-steps">
+          <li>Login ke SGO Admin di browser yang sama.</li>
+          <li>Buka Developer Tools, ambil nilai <code>sgo_admin_session</code>.</li>
+          <li>Tempel di sini, klik Simpan Cookie, lalu Tes Koneksi.</li>
+        </ol>
+        <div id="sgo-cookie-feedback" class="sgo-cookie-feedback hidden" role="status" aria-live="polite"></div>
+        <div class="sgo-cookie-actions">
+          <button id="sgo-cookie-save" type="button" class="sgo-cookie-btn sgo-cookie-btn--primary">Simpan Cookie</button>
+          <button id="sgo-cookie-test" type="button" class="sgo-cookie-btn sgo-cookie-btn--ghost">Tes Koneksi</button>
+          <button id="sgo-cookie-reset" type="button" class="sgo-cookie-btn sgo-cookie-btn--danger">Reset Cookie</button>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- Worksheet SGO Action Modal -->
+  <div id="worksheet-sgo-modal" hidden
+    class="fixed inset-0 z-[95] items-center justify-center p-3 sm:p-6"
+    role="dialog" aria-modal="true" aria-labelledby="worksheet-sgo-title" aria-hidden="true">
+    <div id="worksheet-sgo-backdrop" class="ws-sgo-backdrop absolute inset-0"></div>
+    <div class="ws-sgo-panel relative flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden">
+      <header class="ws-sgo-head">
+        <div class="flex min-w-0 items-center gap-3">
+          <span class="ws-sgo-mark" aria-hidden="true">
+            <i data-lucide="package" class="h-4 w-4"></i>
+          </span>
+          <div class="min-w-0">
+            <p class="ws-sgo-kicker">SGO Admin</p>
+            <h2 id="worksheet-sgo-title" class="ws-sgo-title">Siapkan &amp; Submit</h2>
+            <p id="worksheet-sgo-subtitle" class="ws-sgo-subtitle">—</p>
+          </div>
+        </div>
+        <div class="flex flex-shrink-0 items-center gap-2">
+          <a id="worksheet-sgo-open-tab" href="#" target="_blank" rel="noopener noreferrer"
+            class="ws-sgo-tablink">
+            <i data-lucide="external-link" class="h-3.5 w-3.5"></i>
+            <span class="hidden sm:inline">Tab baru</span>
+          </a>
+          <button id="worksheet-sgo-close" type="button" aria-label="Tutup aksi SGO"
+            class="ws-sgo-close">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </header>
+
+      <div class="relative min-h-0 flex-1 overflow-hidden bg-[#0b0c0f]">
+        <iframe id="worksheet-sgo-frame" class="h-full w-full border-0"
+          title="Aksi Worksheet Perlengkapan SGO"></iframe>
+        <div id="worksheet-sgo-loading" class="ws-sgo-loading">
+          <span class="ws-sgo-spinner" aria-hidden="true"></span>
+          <p id="worksheet-sgo-loading-text">Membuka halaman SGO...</p>
+        </div>
+      </div>
+
+      <footer class="ws-sgo-foot">
+        <p id="worksheet-sgo-fallback" class="ws-sgo-fallback hidden">
+          Modal SGO tidak terbuka otomatis. Gunakan “Tab baru”, lalu pilih aksi pada order ini.
+        </p>
+        <p class="ws-sgo-foot-note">
+          Aksi dijalankan langsung di SGO Admin melalui sesi server. Perubahan tersimpan ke data live.
+        </p>
+      </footer>
+    </div>
+  </div>
+
   <script src="js/tab-controller.js"></script>
+  <script src="js/sgo-sync.js"></script>
   <script src="js/monitoring.js"></script>
   <script src="js/manifest.js"></script>
+  <script src="js/order-access.js"></script>
+  <script src="js/worksheet.js"></script>
+  <script type="module" src="js/rahmah-message-format.mjs"></script>
+  <script src="js/fu-pelunasan.js"></script>
+  <script src="js/addon-per-batch.js"></script>
+  <script src="js/rahmah-polish.js"></script>
+  <script src="js/sgo-cookie.js"></script>
   <script src="app.js"></script>
   <script>
     // Sidebar desktop collapse/expand. Mobile drawer tetap ditangani app.js.

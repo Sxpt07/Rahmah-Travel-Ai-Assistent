@@ -11,6 +11,14 @@ import {
   saveSgoRawError,
   saveSgoRawResponse,
 } from '../data/sgoRawStore.js';
+import { parseDepartureDate } from './departureDate.js';
+import { normalizeCookieHeader } from './sgoCookie.js';
+import { getRequestSgoCookieHeader } from './sgoRequestContext.js';
+import {
+  startSyncProgress,
+  syncPercentFromPages,
+  updateSyncProgress,
+} from './syncProgress.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -113,6 +121,17 @@ const MANIFEST_MAX_ENRICH = Math.max(
 const MANIFEST_CACHE_TTL_MS = Math.max(
   0,
   envNumber('SGO_MANIFEST_CACHE_MS', 5 * 60 * 1000),
+);
+// Pass kedua khusus manifest yang gagal di pass utama. Dijalankan dengan
+// concurrency lebih rendah dan backoff lebih panjang agar rate-limit SGO
+// di akhir scrape tidak menyisakan data NIK/paspor yang gagal.
+const MANIFEST_RETRY_MAX = Math.max(
+  0,
+  Math.min(envNumber('SGO_MANIFEST_RETRY_MAX', 300), 3500),
+);
+const MANIFEST_RETRY_CONCURRENCY = Math.max(
+  1,
+  Math.min(envNumber('SGO_MANIFEST_RETRY_CONCURRENCY', 2), 10),
 );
 const manifestFieldCache = new Map();
 
@@ -263,43 +282,31 @@ export function resolveSgoModule(value = '') {
   return match;
 }
 
-/**
- * Terima beberapa bentuk input cookie:
- * - token sesi mentah: `a16bd2...`
- * - pasangan lengkap: `sgo_admin_session=a16bd2...`
- * - header lengkap: `foo=bar; sgo_admin_session=a16bd2...`
- */
-export function normalizeCookieHeader(value = '') {
-  const raw = String(value || '')
-    .trim()
-    .replace(/^cookie\s*:\s*/i, '')
-    .replace(/\s*\r?\n\s*/g, '; ')
-    .trim();
-
-  if (!raw) return '';
-  if (/(?:^|;\s*)sgo_admin_session\s*=/i.test(raw)) return raw;
-  if (/^[A-Za-z0-9_-]{1,40}=/.test(raw)) return raw; // sudah berupa header cookie
-  return `sgo_admin_session=${raw}`;
-}
+export { normalizeCookieHeader };
 
 export function resolveSgoConfig({ url, cookie, useEnvCookie = false } = {}) {
-  // Sesuai kebutuhan produksi: tanpa override, request selalu diarahkan ke
-  // SGO Rahmah Grup. Cookie tetap wajib berasal dari .env atau UI.
   const rawUrl = String(
     url || process.env.SGO_BASE_URL || 'https://sgo.rahmahgrup.id',
   ).trim();
-  const requestCookie = String(cookie || '').trim();
+  const explicitCookie = String(cookie || '').trim();
+  const deviceCookie = getRequestSgoCookieHeader();
   const envCookie = getEnvCookieHeader();
-  const normalizedRequestCookie = normalizeCookieHeader(requestCookie);
-  const cookieHeader = useEnvCookie
-    ? envCookie
-    : normalizedRequestCookie || envCookie;
-  const cookieSource = useEnvCookie || !normalizedRequestCookie ? 'env' : 'request';
+  const normalizedRequestCookie = normalizeCookieHeader(
+    explicitCookie || deviceCookie,
+  );
+  const cookieHeader = useEnvCookie ? envCookie : normalizedRequestCookie;
+  const cookieSource = useEnvCookie
+    ? 'env'
+    : explicitCookie
+      ? 'request'
+      : normalizedRequestCookie
+        ? 'device'
+        : '';
 
   let baseUrl = '';
   let urlError = '';
   if (!rawUrl) {
-    urlError = 'URL SGO Admin belum diisi. Set SGO_BASE_URL di .env atau isi Base URL di UI.';
+    urlError = 'URL SGO Admin belum diisi. Set SGO_BASE_URL di .env.';
   } else {
     try {
       const parsed = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
@@ -317,7 +324,9 @@ export function resolveSgoConfig({ url, cookie, useEnvCookie = false } = {}) {
 
   const cookieError = cookieHeader
     ? ''
-    : 'Cookie sesi SGO belum tersedia. Set SGO_ADMIN_SESSION di .env atau isi Cookie di UI.';
+    : useEnvCookie
+      ? 'SGO_ADMIN_SESSION belum diisi di .env.'
+      : 'Cookie SGO belum diatur di perangkat ini. Klik tombol Cookie SGO di header untuk menyimpan sesi login.';
 
   return {
     baseUrl,
@@ -615,6 +624,21 @@ export function extractUploadDocumentsRows(html = '') {
   const $ = cheerio.load(html);
   const rows = [];
 
+  // Tanggal ISO resmi paket ada pada opsi filter `paket_id`. Header order hanya
+  // memuat nomor RTB/Batch, jadi opsi ini dipakai untuk memetakan Batch -> RTB
+  // -> tanggal keberangkatan lengkap.
+  const packageDateByRtb = new Map();
+  $('select[name="paket_id"] option').each((__, option) => {
+    const text = cleanCell($(option).text());
+    const rtbMatch = text.match(/RTB[-\s]?(\d{1,4})/i);
+    const isoMatch = text.match(/\((\d{4}-\d{2}-\d{2})\)/);
+    if (!rtbMatch || !isoMatch) return;
+    packageDateByRtb.set(String(Number(rtbMatch[1])), {
+      iso: isoMatch[1],
+      optionText: text,
+    });
+  });
+
   $('.opsdoc-grouphd').each((_, headerEl) => {
     const $header = $(headerEl);
     const orderCode = cleanCell(
@@ -628,11 +652,13 @@ export function extractUploadDocumentsRows(html = '') {
       .get();
     const packageText = metaSpans.find((text) => /^📦/u.test(text)) || '';
     const pemesanText = metaSpans.find((text) => /^🧍/u.test(text)) || '';
+    const phoneText = metaSpans.find((text) => /^📱/u.test(text)) || '';
     const departureText = metaSpans.find((text) => /^🗓/u.test(text)) || '';
 
     const rtbMatch = packageText.match(/RTB[-\s]?(\d{1,4})/i);
-    const rtb = rtbMatch ? `RTB ${rtbMatch[1]}` : '';
     const batchMatch = packageText.match(/Batch\s*(\d+)/i);
+    const rtbNumber = rtbMatch ? rtbMatch[1] : batchMatch ? batchMatch[1] : '';
+    const rtb = rtbNumber ? `RTB ${rtbNumber}` : '';
     const batch = batchMatch ? batchMatch[1] : '';
     const paket = cleanCell(
       packageText
@@ -641,10 +667,23 @@ export function extractUploadDocumentsRows(html = '') {
         .replace(/\s*·\s*Batch\s*\d+\s*$/i, '')
         .replace(/^\[CLOSE\]\s*/i, ''),
     );
+
+    // Urutan sumber tanggal: ISO eksplisit di nama paket, opsi paket SGO
+    // (RTB/Batch), lalu label "Berangkat ..." pada header.
+    const packageIsoMatch = packageText.match(/\((\d{4}-\d{2}-\d{2})\)/);
+    const optionDate = rtbNumber
+      ? packageDateByRtb.get(String(Number(rtbNumber)))
+      : null;
+    const departureDetail = parseDepartureDate(
+      packageIsoMatch?.[1] || optionDate?.iso || departureText,
+    );
     const keberangkatan = cleanCell(
       departureText.replace(/^🗓️?\s*/u, '').replace(/^Berangkat\s*/i, ''),
     );
     const pemesan = cleanCell(pemesanText.replace(/^🧍\s*/u, ''));
+    const pemesanPhone = cleanCell(
+      phoneText.replace(/^📱\s*/u, '').replace(/[^\d+]/g, ''),
+    );
 
     const badges = $header
       .find('.opsdoc-grouphd__badges .opsdoc-badge')
@@ -691,8 +730,13 @@ export function extractUploadDocumentsRows(html = '') {
       const $chips = $tr.find('.opsdoc-chips .opsdoc-chip');
       const chipOn = $chips.filter('.opsdoc-chip--on').length;
       const chipPending = $chips.filter('.opsdoc-chip--pending').length;
+      const chipFilled = chipOn + chipPending;
       const totalDocs = $chips.length || (docMatch ? Number(docMatch[2]) : 6);
-      const filledDocs = docMatch ? Number(docMatch[1]) : chipOn;
+      // SGO membedakan "approved" (chip on) dan "menunggu approval" (pending).
+      // Keduanya berarti berkas sudah diunggah, jadi sama-sama dihitung terisi.
+      const filledDocs = docMatch
+        ? Math.max(Number(docMatch[1]), chipFilled)
+        : chipFilled;
       const statusDokumen =
         totalDocs > 0 && filledDocs >= totalDocs
           ? 'LENGKAP'
@@ -730,15 +774,25 @@ export function extractUploadDocumentsRows(html = '') {
         paket,
         batch,
         keberangkatan,
+        keberangkatanIso: departureDetail.iso,
+        departureYear: departureDetail.year,
+        departureMonth: departureDetail.month,
+        departureDay: departureDetail.day,
+        departureMonthKey: departureDetail.monthKey,
+        departureMonthLabel: departureDetail.monthLabel,
         jumlahJamaah,
         pemesan,
+        pemesanPhone,
+        noHp: pemesanPhone,
         orderMissingDocs,
         orderFilledDocs,
         dokumen,
         statusDokumen,
         dokumenDetail,
         sourceModule: UPLOAD_DOCUMENTS_PATH,
-        rawScrapedText: cleanCell(`${orderCode} | ${paket} | ${nama}`).slice(0, 500),
+        rawScrapedText: cleanCell(
+          `${orderCode} | ${paket} | ${nama} | ${keberangkatan}`,
+        ).slice(0, 500),
       });
     });
   });
@@ -828,7 +882,7 @@ export function extractManifestFields(html = '') {
   };
 }
 
-async function fetchManifestFields(manifestId, config) {
+async function fetchManifestFields(manifestId, config, options = {}) {
   const id = cleanCell(manifestId);
   if (!id) {
     throw buildError('ID manifest jamaah kosong.', 'SGO_MANIFEST_ID');
@@ -840,19 +894,38 @@ async function fetchManifestFields(manifestId, config) {
   }
 
   const targetUrl = `${config.baseUrl}/ops/monitoring-jamaah/${encodeURIComponent(id)}/edit?embed=1`;
+  const attempts = Math.max(1, Math.min(Number(options.attempts) || 2, 6));
+  const baseDelayMs = Math.max(
+    0,
+    Math.min(Number(options.baseDelayMs) || 250, 15000),
+  );
   let lastError = null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(targetUrl, {
-        headers: {
-          ...SGO_BROWSER_HEADERS,
-          // Wajib: setiap request ke SGO membawa sesi admin.
-          Cookie: config.cookieHeader,
-        },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
-      });
+      let response;
+      try {
+        response = await fetch(targetUrl, {
+          headers: {
+            ...SGO_BROWSER_HEADERS,
+            // Wajib: setiap request ke SGO membawa sesi admin.
+            Cookie: config.cookieHeader,
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
+        });
+      } catch (networkError) {
+        const cause =
+          networkError?.cause?.code ||
+          networkError?.cause?.message ||
+          networkError?.name ||
+          '';
+        throw buildError(
+          `Manifest ${id} gagal dihubungi${cause ? ` (${cause})` : ''}.`,
+          'SGO_NETWORK',
+          { manifestId: id, cause },
+        );
+      }
       const html = await response.text();
 
       if (looksLikeLoginPage(html, response.url || targetUrl)) {
@@ -863,10 +936,15 @@ async function fetchManifestFields(manifestId, config) {
         );
       }
       if (!response.ok) {
+        const retryAfter = Number(response.headers.get('retry-after'));
         throw buildError(
           `Manifest ${id} mengembalikan HTTP ${response.status}.`,
           'SGO_HTTP',
-          { manifestId: id, status: response.status },
+          {
+            manifestId: id,
+            status: response.status,
+            retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
+          },
         );
       }
 
@@ -883,8 +961,16 @@ async function fetchManifestFields(manifestId, config) {
       return { fields, cached: false };
     } catch (error) {
       lastError = error;
+      // Auth tidak pernah di-retry: cookie harus diperbarui manual.
       if (error?.code === 'SGO_AUTH') break;
-      if (attempt === 0) await delay(250);
+      if (attempt < attempts) {
+        const retryAfter = Number(error?.retryAfter);
+        const waitMs =
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(retryAfter * 1000, 15000)
+            : Math.min(baseDelayMs * 2 ** (attempt - 1), 15000);
+        if (waitMs > 0) await delay(waitMs);
+      }
     }
   }
 
@@ -911,6 +997,28 @@ async function mapWithConcurrency(items = [], limit = 1, worker) {
   return results;
 }
 
+/** Salin field manifest ke baris jamaah tanpa menimpa data yang sudah ada. */
+function applyManifestFields(row, fields = {}) {
+  if (fields.nik) {
+    row.nik = fields.nik;
+    row.ktp = row.ktp || fields.nik;
+  }
+  if (fields.passport) {
+    row.passport = fields.passport;
+    row.paspor = fields.passport;
+    row.noPaspor = fields.passport;
+  }
+  if (fields.identityType) row.identityType = fields.identityType;
+  if (fields.noHp && !row.noHp) row.noHp = fields.noHp;
+  if (fields.tempatLahir && !row.tempatLahir) row.tempatLahir = fields.tempatLahir;
+  if (fields.tanggalLahir && !row.tanggalLahir) row.tanggalLahir = fields.tanggalLahir;
+  if (fields.kotaPaspor && !row.kotaPaspor) row.kotaPaspor = fields.kotaPaspor;
+  if (fields.tanggalExpiredPaspor && !row.tanggalExpiredPaspor) {
+    row.tanggalExpiredPaspor = fields.tanggalExpiredPaspor;
+  }
+}
+
+
 /**
  * Lengkapi setiap baris jamaah dengan NIK/paspor dari halaman manifest.
  * Hanya baris yang punya manifestId yang di-fetch. Kegagalan satu manifest
@@ -935,11 +1043,14 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     fetched: 0,
     cacheHits: 0,
     failed: 0,
+    retried: 0,
+    recovered: 0,
     skipped: 0,
     withNik: 0,
     withPassport: 0,
     withBoth: 0,
     ms: 0,
+    failures: [],
   };
 
   for (const row of list) {
@@ -971,6 +1082,12 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
 
   if (!config?.baseUrl || !config?.cookieHeader) {
     stats.failed = selected.length;
+    stats.failures = selected.map((row) => ({
+      manifestId: cleanCell(row.manifestId),
+      code: 'SGO_CONFIG',
+      status: null,
+      message: 'Konfigurasi URL/cookie SGO tidak lengkap.',
+    }));
     if (log) {
       console.warn('[SGO] Manifest dilewati: konfigurasi URL/cookie SGO tidak lengkap.');
     }
@@ -987,6 +1104,7 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     );
   }
 
+  const failures = [];
   await mapWithConcurrency(selected, concurrency, async (row) => {
     if (authError) {
       stats.skipped += 1;
@@ -996,30 +1114,19 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
 
     try {
       const result = await fetchManifestFields(row.manifestId, config);
-      const fields = result.fields;
       row.manifestFetched = true;
       if (result.cached) stats.cacheHits += 1;
       else stats.fetched += 1;
-
-      if (fields.nik) {
-        row.nik = fields.nik;
-        row.ktp = row.ktp || fields.nik;
-      }
-      if (fields.passport) {
-        row.passport = fields.passport;
-        row.paspor = fields.passport;
-        row.noPaspor = fields.passport;
-      }
-      if (fields.identityType) row.identityType = fields.identityType;
-      if (fields.noHp && !row.noHp) row.noHp = fields.noHp;
-      if (fields.tempatLahir && !row.tempatLahir) row.tempatLahir = fields.tempatLahir;
-      if (fields.tanggalLahir && !row.tanggalLahir) row.tanggalLahir = fields.tanggalLahir;
-      if (fields.kotaPaspor && !row.kotaPaspor) row.kotaPaspor = fields.kotaPaspor;
-      if (fields.tanggalExpiredPaspor && !row.tanggalExpiredPaspor) {
-        row.tanggalExpiredPaspor = fields.tanggalExpiredPaspor;
-      }
+      applyManifestFields(row, result.fields);
     } catch (error) {
       stats.failed += 1;
+      failures.push({
+        row,
+        manifestId: cleanCell(row.manifestId),
+        code: error?.code || 'SGO_MANIFEST',
+        status: Number(error?.status) || null,
+        message: error?.message || '',
+      });
       if (error?.code === 'SGO_AUTH') authError = error;
       if (stats.failed <= 5) {
         console.warn(
@@ -1028,6 +1135,14 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
       }
     } finally {
       done += 1;
+      if (done % 10 === 0 || done === selected.length) {
+        updateSyncProgress({
+          phase: 'manifest',
+          percent: 82 + (done / Math.max(1, selected.length)) * 11,
+          message: `Memvalidasi NIK & paspor manifest ${done.toLocaleString('id-ID')}/${selected.length.toLocaleString('id-ID')}...`,
+          detail: `${stats.fetched + stats.cacheHits} manifest OK • ${stats.failed} gagal`,
+        });
+      }
       if (log && (done % 50 === 0 || done === selected.length)) {
         console.log(
           `[SGO] Progress manifest ${done}/${selected.length} | OK ${stats.fetched + stats.cacheHits} | gagal ${stats.failed}`,
@@ -1035,6 +1150,99 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
       }
     }
   });
+
+  // Pass kedua: hanya manifest yang gagal, concurrency lebih rendah dan
+  // backoff lebih panjang. Ini menangani rate-limit/timeout sesaat yang
+  // biasanya muncul di akhir scrape saat ratusan request sudah berjalan.
+  if (!authError && failures.length && MANIFEST_RETRY_MAX > 0) {
+    const retryCandidates = failures.slice(0, MANIFEST_RETRY_MAX);
+    const unreached = failures.length - retryCandidates.length;
+    if (unreached > 0) {
+      console.warn(
+        `[SGO] Retry manifest dibatasi ${MANIFEST_RETRY_MAX}; ${unreached} gagal tidak dicoba ulang.`,
+      );
+    }
+    stats.retried = retryCandidates.length;
+    const retryConcurrency = Math.min(MANIFEST_RETRY_CONCURRENCY, concurrency);
+    const retryBaseDelay = Math.max(1000, SGO_HTTP_RETRY_BASE_MS);
+    let retryDone = 0;
+    let retryFailedLogged = 0;
+    if (log) {
+      console.log(
+        `[SGO] Retry ${retryCandidates.length} manifest gagal ` +
+          `(concurrency ${retryConcurrency}, backoff ${retryBaseDelay}ms)...`,
+      );
+    }
+    updateSyncProgress({
+      phase: 'manifest',
+      percent: 93.5,
+      message: `Mencoba ulang ${retryCandidates.length.toLocaleString('id-ID')} manifest yang gagal...`,
+      detail: `${stats.failed} gagal di pass pertama`,
+    });
+
+    await mapWithConcurrency(
+      retryCandidates,
+      retryConcurrency,
+      async (failure, index) => {
+        if (authError) {
+          retryDone += 1;
+          return;
+        }
+        try {
+          const result = await fetchManifestFields(failure.manifestId, config, {
+            attempts: Math.max(3, Math.min(SGO_HTTP_RETRY_ATTEMPTS, 6)),
+            baseDelayMs: retryBaseDelay,
+          });
+          failure.row.manifestFetched = true;
+          if (result.cached) stats.cacheHits += 1;
+          else stats.fetched += 1;
+          applyManifestFields(failure.row, result.fields);
+          stats.recovered += 1;
+        } catch (error) {
+          failure.code = error?.code || 'SGO_MANIFEST';
+          failure.status = Number(error?.status) || null;
+          failure.message = error?.message || '';
+          if (error?.code === 'SGO_AUTH') authError = error;
+          if (log && retryFailedLogged < 20) {
+            retryFailedLogged += 1;
+            console.warn(
+              `[SGO] Manifest ${failure.manifestId} tetap gagal setelah retry (${failure.code}): ${failure.message}`,
+            );
+          } else if (log && retryFailedLogged === 20) {
+            retryFailedLogged += 1;
+            console.warn(
+              '[SGO] Manifest gagal setelah retry lainnya tidak dicetak satu per satu; lihat ringkasan akhir.',
+            );
+          }
+        } finally {
+          retryDone += 1;
+          if (log && (retryDone % 10 === 0 || retryDone === retryCandidates.length)) {
+            console.log(
+              `[SGO] Retry manifest ${retryDone}/${retryCandidates.length} | pulih ${stats.recovered} | sisa gagal ${stats.failed - stats.recovered}`,
+            );
+          }
+        }
+        return index;
+      },
+    );
+
+    stats.failed = Math.max(0, failures.length - stats.recovered);
+    updateSyncProgress({
+      phase: 'manifest',
+      percent: 95,
+      message: 'Retry manifest selesai...',
+      detail: `${stats.recovered} pulih • ${stats.failed} gagal`,
+    });
+  }
+
+  stats.failures = failures
+    .filter((failure) => failure.row.manifestFetched !== true)
+    .map(({ manifestId, code, status, message }) => ({
+      manifestId,
+      code,
+      status,
+      message,
+    }));
 
   for (const row of list) {
     if (!row) continue;
@@ -1056,8 +1264,25 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
       `[SGO] Manifest selesai: ${stats.fetched} fetch + ${stats.cacheHits} cache = ` +
         `${stats.fetched + stats.cacheHits}/${stats.selected} OK | ${stats.failed} gagal | ` +
         `${stats.limited} dilewati batas | ` +
+        (stats.retried ? `retry ${stats.retried} (pulih ${stats.recovered}) | ` : '') +
         `NIK ${stats.withNik}/${stats.total} | Paspor ${stats.withPassport}/${stats.total} | ` +
         `${stats.ms}ms`,
+    );
+  }
+  if (log && stats.failures.length) {
+    const maxDetail = 30;
+    const detail = stats.failures
+      .slice(0, maxDetail)
+      .map(
+        ({ manifestId, code, status }) =>
+          `${manifestId}:${code}${status ? `/${status}` : ''}`,
+      )
+      .join(', ');
+    console.warn(
+      `[SGO] Manifest gagal final (${stats.failures.length}): ${detail}` +
+        (stats.failures.length > maxDetail
+          ? ` ... (+${stats.failures.length - maxDetail} lagi)`
+          : ''),
     );
   }
 
@@ -1155,16 +1380,42 @@ function mergeMissingJamaahFields(target, source) {
 }
 
 /**
+ * Prioritas sumber saat menggabungkan baris. Upload Manifest adalah sumber
+ * otoritatif untuk status dokumen, RTB, dan tanggal keberangkatan karena modul
+ * itu memuat seluruh jamaah lewat pagination. Monitoring Jamaah dipakai untuk
+ * melengkapi pembayaran/NIK/paspor yang tidak ada di Upload Manifest.
+ */
+function jamaahSourcePriority(row = {}) {
+  const source = cleanCell(row.sourceModule || '').toLowerCase();
+  if (source.includes('/ops/upload-documents')) return 3;
+  if (source.includes('/ops/monitoring-jamaah')) return 2;
+  return 1;
+}
+
+/**
  * Gabungkan baris dari beberapa sumber (Monitoring Jamaah + Upload Manifest).
- * Baris pertama menang untuk field yang sudah terisi; field kosong diisi dari
- * baris berikutnya. Pencocokan memakai manifestId, lalu kode order + nama.
+ * Baris dengan prioritas lebih tinggi diproses lebih dulu agar field dokumen,
+ * RTB, dan keberangkatan yang sudah terisi tidak dikalahkan data Monitoring
+ * yang usang. Field kosong tetap diisi dari sumber berikutnya. Pencocokan
+ * memakai manifestId, lalu kode order + nama.
  */
 export function mergeJamaahRows(rows = []) {
   const merged = [];
   const index = new Map();
 
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue;
+  // Array.prototype.sort stabil di Node modern: urutan asli dipertahankan
+  // untuk sumber dengan prioritas sama.
+  const orderedRows = rows
+    .map((row, position) => ({ row, position }))
+    .filter((item) => item.row && typeof item.row === 'object')
+    .sort(
+      (a, b) =>
+        jamaahSourcePriority(b.row) - jamaahSourcePriority(a.row) ||
+        a.position - b.position,
+    )
+    .map((item) => item.row);
+
+  for (const row of orderedRows) {
     const keys = jamaahIdentityKeys(row);
     let target = null;
     for (const key of keys) {
@@ -1217,11 +1468,13 @@ export function buildSgoPageUrl(baseUrl, modulePath, page = 1) {
 /**
  * URL Upload Manifest. `search=ORD` wajib dipakai agar SGO menampilkan
  * seluruh order (bukan hanya hasil default) dan pagination tetap konsisten.
+ * Untuk sinkronisasi satu jamaah, `search` dapat diisi nama/kode order.
  */
-export function buildUploadDocumentsUrl(baseUrl, page = 1) {
+export function buildUploadDocumentsUrl(baseUrl, page = 1, search = '') {
   const url = new URL(`${baseUrl}${UPLOAD_DOCUMENTS_PATH}`);
-  if (UPLOAD_DOCUMENTS_SEARCH) {
-    url.searchParams.set('search', UPLOAD_DOCUMENTS_SEARCH);
+  const keyword = String(search || '').trim() || UPLOAD_DOCUMENTS_SEARCH;
+  if (keyword) {
+    url.searchParams.set('search', keyword);
   }
   const pageNumber = Math.trunc(Number(page) || 1);
   if (pageNumber > 1) {
@@ -1354,7 +1607,7 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
     if (looksLikeLoginPage(html, finalUrl)) {
       const authError = buildError(
-        `Cookie kedaluwarsa / sesi login habis saat mengakses ${modulePath || targetUrl}. Perbarui SGO_ADMIN_SESSION di .env.`,
+        `Cookie SGO perangkat ini kedaluwarsa atau tidak valid saat mengakses ${modulePath || targetUrl}. Buka tombol Cookie SGO di header, tempel cookie baru, lalu simpan.`,
         'SGO_AUTH',
         { modulePath, targetUrl, page, status: response.status },
       );
@@ -1503,6 +1756,16 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     persistRaw,
   });
 
+  const moduleLabel = getSgoModuleMeta(normalizedPath)?.label || normalizedPath;
+  updateSyncProgress({
+    phase: 'pages',
+    percent: syncPercentFromPages(1, 0, { start: 5, end: 30 }),
+    message: `Mengambil ${moduleLabel} halaman 1...`,
+    detail: `${firstPage.rows.length.toLocaleString('id-ID')} baris pada halaman pertama`,
+    pagesFetched: 1,
+    rows: firstPage.rows.length,
+  });
+
   const pagination = {
     enabled: PAGINATION_ENABLED,
     pageParam: PAGINATION_PAGE_PARAM,
@@ -1610,6 +1873,17 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
 
     pagination.pagesWithRows += 1;
     const added = addPageRows(currentPage.rows);
+    updateSyncProgress({
+      phase: 'pages',
+      percent: syncPercentFromPages(pagination.pagesFetched, 0, {
+        start: 5,
+        end: 30,
+      }),
+      message: `Mengambil ${moduleLabel} halaman ${pagination.pagesFetched}...`,
+      detail: `${combinedRows.length.toLocaleString('id-ID')} jamaah terkumpul`,
+      pagesFetched: pagination.pagesFetched,
+      rows: combinedRows.length,
+    });
     if (added === 0) {
       stopReason = 'no-new-rows';
       break;
@@ -1644,7 +1918,11 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
  */
 export async function fetchUploadDocumentsPage(config, page = 1, options = {}) {
   const pageNumber = Math.max(1, Math.trunc(Number(page) || 1));
-  const targetUrl = buildUploadDocumentsUrl(config.baseUrl, pageNumber);
+  const targetUrl = buildUploadDocumentsUrl(
+    config.baseUrl,
+    pageNumber,
+    options.search,
+  );
   const persistRawPage = Boolean(options.persistRaw && pageNumber === 1);
   const { response, html, finalUrl, contentType, ms } = await fetchSgoHtml(
     targetUrl,
@@ -1716,10 +1994,11 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     ),
   );
   const effectiveMaxPages = PAGINATION_ENABLED ? maxPages : 1;
+  const search = String(options.search || '').trim() || UPLOAD_DOCUMENTS_SEARCH;
   const stats = {
     enabled: PAGINATION_ENABLED,
     mode: 'upload-documents',
-    search: UPLOAD_DOCUMENTS_SEARCH,
+    search,
     pageParam: PAGINATION_PAGE_PARAM,
     delayMs: PAGINATION_DELAY_MS,
     maxPages: effectiveMaxPages,
@@ -1781,13 +2060,40 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     }
   };
 
+  // Kirim baris per halaman ke pemanggil (server) agar cache SQLite bisa
+  // diperbarui saat sinkronisasi masih berjalan. Kegagalan callback tidak
+  // boleh menghentikan pagination utama.
+  const notifyPageRows = (current, added = 0) => {
+    if (typeof options.onPageRows !== 'function') return;
+
+    try {
+      const result = options.onPageRows({
+        rows: Array.isArray(current?.rows) ? current.rows : [],
+        page: Number(current?.page || 0),
+        added: Number(added) || 0,
+        pagesFetched: Number(stats.pagesFetched) || 0,
+        totalPages: Number(stats.totalPagesReported) || 0,
+        totalRows: combined.length,
+      });
+      if (result && typeof result.catch === 'function') {
+        result.catch((error) => {
+          console.warn(
+            `[SGO Upload] Callback halaman ${current?.page || '?'} gagal: ${error.message}`,
+          );
+        });
+      }
+    } catch (error) {
+      console.warn(
+        `[SGO Upload] Callback halaman ${current?.page || '?'} gagal: ${error.message}`,
+      );
+    }
+  };
+
   while (page <= effectiveMaxPages) {
     if (page > 1 && PAGINATION_DELAY_MS > 0) {
       await delay(PAGINATION_DELAY_MS);
     }
-    const searchLabel = UPLOAD_DOCUMENTS_SEARCH
-      ? `?search=${UPLOAD_DOCUMENTS_SEARCH}`
-      : '';
+    const searchLabel = search ? `?search=${search}` : '';
     console.log(
       `[SGO] Scraping page ${page}... (${UPLOAD_DOCUMENTS_PATH}${searchLabel})`,
     );
@@ -1796,6 +2102,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     try {
       current = await fetchUploadDocumentsPage(config, page, {
         persistRaw: options.persistRaw !== false,
+        search,
       });
     } catch (error) {
       recordFailure(page, error, 'pagination');
@@ -1934,6 +2241,26 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     if (page === 1) stats.rowsOnFirstPage = current.rows.length;
 
     const added = ingestPage(current);
+    notifyPageRows(current, added);
+    updateSyncProgress({
+      phase: 'upload-pages',
+      percent: syncPercentFromPages(
+        stats.pagesFetched,
+        stats.totalPagesReported,
+        { start: 6, end: 80 },
+      ),
+      message: `Mengambil Upload Manifest halaman ${page}${
+        stats.totalPagesReported ? ` dari ${stats.totalPagesReported}` : ''
+      }...`,
+      detail:
+        `${combined.length.toLocaleString('id-ID')} jamaah terkumpul` +
+        (stats.totalJamaahReported
+          ? ` • ${stats.totalJamaahReported.toLocaleString('id-ID')} total di SGO`
+          : ''),
+      pagesFetched: stats.pagesFetched,
+      totalPages: stats.totalPagesReported,
+      rows: combined.length,
+    });
     console.log(
       `[SGO] Scraping page ${page} selesai: +${added} jamaah ` +
         `(total ${combined.length}).`,
@@ -1969,6 +2296,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
       try {
         const recovered = await fetchUploadDocumentsPage(config, failedPage, {
           persistRaw: false,
+          search,
         });
 
         if (!recovered.pageOk) {
@@ -1993,6 +2321,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
           recovered.pageInfo.totalPages || stats.totalPagesReported;
 
         const added = ingestPage(recovered);
+        notifyPageRows(recovered, added);
         if (recovered.page === 1 && !firstPage) firstPage = recovered;
         if (!lastPage || recovered.page >= lastPage.page) lastPage = recovered;
 
@@ -2040,7 +2369,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     modulePath: UPLOAD_DOCUMENTS_PATH,
     page: lastPage?.page || 1,
     targetUrl:
-      lastPage?.targetUrl || buildUploadDocumentsUrl(config.baseUrl, 1),
+      lastPage?.targetUrl || buildUploadDocumentsUrl(config.baseUrl, 1, search),
     finalUrl: lastPage?.finalUrl || '',
     status: lastPage?.status || 0,
     contentType: lastPage?.contentType || 'text/html',
@@ -2055,17 +2384,115 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
   };
 }
 
+function normalizeLookup(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Pilih baris SGO yang paling mungkin merupakan jamaah target.
+ * Prioritas: manifestId persis, kode order (+nama), nama persis, lalu
+ * pencocokan sebagian pada nama/kode order.
+ */
+export function pickJamaahMatch(rows = [], hints = {}) {
+  const manifestId = cleanCell(hints.manifestId || hints.jamaahId);
+  const order = normalizeLookup(
+    hints.orderCode || hints.orderId || hints.kodeOrder || '',
+  );
+  const name = normalizeLookup(hints.nama || hints.name || '');
+  const query = normalizeLookup(hints.query || '');
+
+  let best = null;
+  let bestScore = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const rowId = cleanCell(row.manifestId || row.jamaahId);
+    const rowOrder = normalizeLookup(
+      row.orderCode || row.orderId || row.kodeOrder || '',
+    );
+    const rowName = normalizeLookup(row.nama || row.name || '');
+    let score = 0;
+
+    if (manifestId && rowId === manifestId) score = 100;
+    else if (order && rowOrder === order) {
+      score = name && rowName === name ? 95 : 85;
+    } else if (name && rowName === name) score = 70;
+    else if (query && rowName.includes(query)) score = 50;
+    else if (query && rowOrder.includes(query)) score = 40;
+
+    if (score > bestScore) {
+      best = row;
+      bestScore = score;
+    }
+  }
+
+  return { row: best, score: bestScore };
+}
+
+/**
+ * Sinkronisasi satu jamaah: cari lewat Upload Manifest SGO memakai kata kunci
+ * nama/kode order, lalu kembalikan baris yang cocok beserta data dokumennya.
+ */
+export async function fetchSingleJamaahFromSgo({
+  url,
+  cookie,
+  query,
+  hints = {},
+  maxPages = 3,
+} = {}) {
+  const keyword = cleanCell(query);
+  if (!keyword) {
+    throw buildError(
+      'Kata kunci jamaah kosong. Sertakan nama atau kode order.',
+      'SGO_QUERY',
+    );
+  }
+
+  const config = resolveSgoConfig({ url, cookie });
+  if (!config.ok) {
+    throw buildError(
+      config.urlError || config.cookieError || 'Konfigurasi SGO tidak valid.',
+      config.cookieError ? 'SGO_COOKIE_MISSING' : 'SGO_CONFIG',
+      { config },
+    );
+  }
+
+  const result = await fetchUploadDocumentsPaginated(config, {
+    search: keyword,
+    maxPages,
+    persistRaw: false,
+  });
+  const match = pickJamaahMatch(result.rows, { ...hints, query: keyword });
+
+  return {
+    config,
+    keyword,
+    match: match.row,
+    score: match.score,
+    rows: result.rows,
+    pagination: result.pagination,
+    page: result,
+  };
+}
+
 /**
  * Jalankan satu putaran fetch paralel memakai satu config cookie.
  * Tidak pernah throw untuk kegagalan modul; semua error dikumpulkan di
  * `errors` agar pemanggil bisa memutuskan fallback.
  */
-async function runSgoAttempt({ config, modulePaths }) {
+async function runSgoAttempt({ config, modulePaths, onUploadPage }) {
   const settled = await Promise.allSettled(
     modulePaths.map((modulePath) => {
       const normalizedPath = normalizeModulePath(modulePath);
       if (normalizedPath === UPLOAD_DOCUMENTS_PATH) {
-        return fetchUploadDocumentsPaginated(config);
+        return fetchUploadDocumentsPaginated(config, {
+          onPageRows:
+            typeof onUploadPage === 'function' ? onUploadPage : undefined,
+        });
       }
       return isJamaahModule(normalizedPath)
         ? fetchSgoModulePaginated(normalizedPath, config)
@@ -2145,24 +2572,23 @@ async function runSgoAttempt({ config, modulePaths }) {
 /**
  * Scrape cepat (fetch paralel) untuk satu modul fokus atau seluruh 16 modul.
  *
- * Jika cookie dari UI/request tidak menghasilkan data, otomatis retry SEKALI
- * memakai SGO_ADMIN_SESSION dari .env. Hasil akhir menandai `usedEnvCookie`
- * dan `requestCookieError` agar route bisa memberi warning ke UI.
+ * Cookie diambil dari request perangkat (atau override eksplisit pada body).
+ * Tidak ada fallback ke cookie .env agar sesi antar perangkat tidak tercampur.
  */
-export async function scrapeSgoModules({ url, cookie, focusModule } = {}) {
-  const envSession = getEnvSession();
-  if (!envSession) {
-    console.error(
-      '[SGO] ERROR: SGO_ADMIN_SESSION kosong atau tidak ditemukan di .env. ' +
-        'Scrape hanya bisa memakai cookie dari UI.',
-    );
-  }
-
+export async function scrapeSgoModules({
+  url,
+  cookie,
+  focusModule,
+  enrichManifest = true,
+  onUploadPage,
+} = {}) {
   const requestConfig = resolveSgoConfig({ url, cookie });
   if (!requestConfig.ok) {
-    throw buildError(requestConfig.urlError || requestConfig.cookieError, 'SGO_CONFIG', {
-      config: requestConfig,
-    });
+    throw buildError(
+      requestConfig.urlError || requestConfig.cookieError,
+      requestConfig.cookieError ? 'SGO_COOKIE_MISSING' : 'SGO_CONFIG',
+      { config: requestConfig },
+    );
   }
 
   const focus = resolveSgoModule(focusModule);
@@ -2179,47 +2605,32 @@ export async function scrapeSgoModules({ url, cookie, focusModule } = {}) {
     `[SGO] Scrape ${focus ? `modul ${modulePaths.join(', ')}` : `${modulePaths.length} modul`} | cookie dari ${requestConfig.cookieSource} (${maskCookie(requestConfig.cookieHeader)}) | base ${requestConfig.baseUrl}`,
   );
 
+  updateSyncProgress({
+    phase: 'fetching',
+    percent: 3,
+    message: focus
+      ? `Mengambil data ${getSgoModuleMeta(focus)?.label || focus} dari SGO...`
+      : `Mengambil ${modulePaths.length} modul SGO...`,
+    detail: 'Koneksi SGO Admin terhubung',
+    modules: modulePaths,
+  });
+
   let config = requestConfig;
-  let attempt = await runSgoAttempt({ config, modulePaths });
+  let attempt = await runSgoAttempt({ config, modulePaths, onUploadPage });
+  updateSyncProgress({
+    phase: 'merging',
+    percent: 81,
+    message: 'Menggabungkan data Monitoring Jamaah & Upload Manifest...',
+    detail: `${attempt.rows.length.toLocaleString('id-ID')} jamaah unik`,
+    rows: attempt.rows.length,
+  });
   let usedEnvCookie = false;
   let requestCookieError = '';
 
-  const focusLoadsWithoutRows =
-    Boolean(focus) &&
-    !isJamaahModule(focus) &&
-    attempt.modulesVisited.includes(focus);
-
-  const canRetryWithEnv =
-    attempt.rows.length === 0 &&
-    !focusLoadsWithoutRows &&
-    requestConfig.cookieSource === 'request' &&
-    Boolean(envSession) &&
-    requestConfig.cookieHeader !== requestConfig.envCookie;
-
-  if (canRetryWithEnv) {
-    requestCookieError =
-      attempt.authError?.message ||
-      attempt.errors[0]?.message ||
-      'Tidak ada baris jamaah pada cookie yang dikirim dari UI.';
-    console.warn(`[SGO] Cookie dari UI gagal: ${requestCookieError}`);
-    console.warn('[SGO] Mencoba ulang dengan cookie SGO_ADMIN_SESSION dari .env...');
-
-    const envConfig = resolveSgoConfig({ url, cookie: '', useEnvCookie: true });
-    const retry = await runSgoAttempt({ config: envConfig, modulePaths });
-    config = envConfig;
-    attempt = retry;
-
-    if (retry.rows.length > 0) {
-      usedEnvCookie = true;
-      console.log(`[SGO] Retry cookie .env berhasil: ${retry.rows.length} jamaah.`);
-    } else {
-      console.error('[SGO] Retry dengan cookie .env juga tidak menghasilkan data.');
-    }
-  }
-
-  // Enrichment dijalankan sekali pada hasil final (setelah retry cookie),
-  // supaya tidak ada request manifest ganda.
-  if (attempt.rows.length > 0) {
+  // Enrichment dijalankan sekali pada hasil final, supaya tidak ada request
+  // manifest ganda. Refresh Upload Manifest boleh melewati tahap ini karena
+  // hanya membutuhkan status dokumen/RTB.
+  if (enrichManifest && attempt.rows.length > 0) {
     const enriched = await enrichJamaahWithManifest(attempt.rows, config, {
       max: MANIFEST_MAX_ENRICH,
     });
@@ -2238,6 +2649,79 @@ export async function scrapeSgoModules({ url, cookie, focusModule } = {}) {
     requestCookieError,
     ...attempt,
   };
+}
+
+export async function verifySgoCookie({ url, cookie } = {}) {
+  const config = resolveSgoConfig({ url, cookie });
+  if (!config.ok) {
+    return {
+      ok: false,
+      code: config.cookieError ? 'SGO_COOKIE_MISSING' : 'SGO_CONFIG',
+      message: config.urlError || config.cookieError,
+      status: 0,
+    };
+  }
+
+  const targetUrl = `${config.baseUrl}/ops/monitoring-jamaah`;
+  try {
+    const response = await fetch(targetUrl, {
+      headers: {
+        ...SGO_BROWSER_HEADERS,
+        Cookie: config.cookieHeader,
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(20_000),
+    });
+    const html = await response.text();
+    const finalUrl = response.url || targetUrl;
+
+    if (looksLikeLoginPage(html, finalUrl)) {
+      return {
+        ok: false,
+        code: 'SGO_AUTH',
+        message:
+          'Cookie SGO kedaluwarsa atau tidak valid. Tempel cookie baru dari SGO Admin, lalu simpan.',
+        status: response.status,
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        code: 'SGO_HTTP',
+        message: `SGO mengembalikan HTTP ${response.status}. Coba lagi beberapa saat.`,
+        status: response.status,
+      };
+    }
+
+    if (html.length < 500) {
+      return {
+        ok: false,
+        code: 'SGO_LAYOUT',
+        message:
+          'Halaman SGO tidak dikenali. Pastikan cookie berasal dari akun admin SGO yang benar.',
+        status: response.status,
+      };
+    }
+
+    return {
+      ok: true,
+      code: 'SGO_COOKIE_OK',
+      message: 'Cookie SGO valid. SGO Admin dapat diakses dari perangkat ini.',
+      status: response.status,
+    };
+  } catch (error) {
+    const timeout =
+      error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    return {
+      ok: false,
+      code: timeout ? 'SGO_TIMEOUT' : 'SGO_NETWORK',
+      message: timeout
+        ? 'Tes cookie melewati batas waktu. Periksa koneksi lalu coba lagi.'
+        : `Tidak dapat menghubungi SGO: ${error.message || 'jaringan gagal'}.`,
+      status: 0,
+    };
+  }
 }
 
 /**

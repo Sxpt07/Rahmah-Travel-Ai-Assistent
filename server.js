@@ -9,6 +9,8 @@ import { processChat, getAIStatus } from './services/aiEngine.js';
 import { buildChatJamaahResults } from './services/consoleJamaahBridge.js';
 import {
   setJamaahData,
+  upsertJamaahRows,
+  findJamaahById,
   getActiveJamaah,
   getJamaahData,
   getJamaahSource,
@@ -19,6 +21,7 @@ import {
 import {
   SGO_MODULES,
   SGO_MODULE_OPTIONS,
+  fetchSingleJamaahFromSgo,
   formatJamaahList,
   getEnvSession,
   getSgoModuleMeta,
@@ -26,8 +29,37 @@ import {
   resolveSgoModule,
   scrapeSgoModules,
   scrapeSgoWithBrowser,
-  validateSgoEnv,
+  verifySgoCookie,
 } from './services/sgoScraper.js';
+import {
+  SGO_DEVICE_COOKIE_NAME,
+  readSgoDeviceCookie,
+  sgoDeviceCookieOptions,
+  toSgoSessionCookieHeader,
+} from './services/sgoCookie.js';
+import {
+  getRequestSgoCookieHeader,
+  runWithSgoCookie,
+} from './services/sgoRequestContext.js';
+import {
+  buildMonitoringSummary,
+  buildSafeJamaahRow,
+} from './services/documentStatus.js';
+import {
+  beginLiveManifestSync,
+  commitLiveManifestSync,
+  ensureManifestCache,
+  rollbackLiveManifestSync,
+  upsertLiveManifestRows,
+} from './services/manifestStore.js';
+import {
+  failSyncProgress,
+  finishSyncProgress,
+  getSyncProgress,
+  resetSyncProgress,
+  startSyncProgress,
+  updateSyncProgress,
+} from './services/syncProgress.js';
 import {
   SGO_RAW_MODULES,
   getSgoRawStatus,
@@ -35,6 +67,19 @@ import {
 } from './data/sgoRawStore.js';
 import monitoringRoutes from './routes/monitoringRoutes.js';
 import manifestRoutes from './routes/manifestRoutes.js';
+import worksheetRoutes from './routes/worksheetRoutes.js';
+import portalRoutes from './routes/portalRoutes.js';
+import fuPelunasanRoutes from './routes/fuPelunasanRoutes.js';
+import addonRoutes from './routes/addonRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import {
+  formatAddonChatReply,
+  searchAddonsForChat,
+} from './services/addonStore.js';
+import {
+  sgoEditRouter,
+  sgoProxyRouter,
+} from './routes/sgoEditRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,10 +93,43 @@ const PORT =
     : 3000;
 
 app.use(cors());
+app.use((req, res, next) => {
+  runWithSgoCookie(readSgoDeviceCookie(req), next);
+});
+// Proxy aset/form SGO harus menerima body mentah (multipart) sebelum
+// express.json memproses request lain.
+app.use('/sgo-proxy', sgoProxyRouter);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/manifest', manifestRoutes);
+app.use('/api/worksheet', worksheetRoutes);
+app.use('/api/portal', portalRoutes);
+app.use('/api/fu-pelunasan', fuPelunasanRoutes);
+app.use('/api/add-on', addonRoutes);
+app.use('/api/message', messageRoutes);
+app.use(sgoEditRouter);
+
+// Deep link modul console. Tab controller tetap menentukan tampilan aktif di
+// sisi klien, tetapi refresh langsung pada URL modul tidak lagi 404.
+const PUBLIC_DIR = path.join(__dirname, 'public');
+for (const routePath of [
+  '/ops/monitoring-jamaah',
+  '/ops/upload-documents',
+  '/ops/worksheet-perlengkapan',
+  '/ops/fu-pelunasan',
+  '/ops/add-on',
+]) {
+  app.get(routePath, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  });
+}
+
+// Beacon Cloudflare RUM yang terbawa halaman SGO memanggil /cdn-cgi/rum di
+// origin konsol. Tidak ada data yang perlu dikirim; jawab 204 agar console
+// browser tetap bersih.
+app.all('/cdn-cgi/rum', (req, res) => res.status(204).end());
 
 function supportedModulesPayload() {
   return SGO_MODULE_OPTIONS.map(({ path, label, jamaahSource }) => ({
@@ -59,6 +137,20 @@ function supportedModulesPayload() {
     label,
     jamaahSource,
   }));
+}
+
+function sgoCookieStatusPayload(active, message = '') {
+  const isActive = Boolean(active);
+  return {
+    success: true,
+    active: isActive,
+    state: isActive ? 'active' : 'empty',
+    message:
+      message ||
+      (isActive
+        ? 'Cookie SGO tersimpan di perangkat ini.'
+        : 'Cookie SGO belum diatur di perangkat ini. Klik tombol Cookie SGO untuk menempelkan cookie.'),
+  };
 }
 
 function rawResponseFields(focusModule = '') {
@@ -209,6 +301,105 @@ function paginationPageCount(result = {}) {
   );
 }
 
+function countUniqueRows(rows = [], pick) {
+  const set = new Set();
+  for (const row of rows) {
+    const value = String(pick(row) || '').trim().toUpperCase();
+    if (value) set.add(value);
+  }
+  return set.size;
+}
+
+/**
+ * Ringkasan agregat sinkronisasi. Tidak berisi NIK/paspor/nomor HP, hanya
+ * angka yang aman ditampilkan di UI dan ditulis ke log server.
+ */
+function buildSyncSummary({
+  rows = [],
+  stored = [],
+  pagination = [],
+  manifest = null,
+  source = null,
+  cache = null,
+  modules = [],
+  startedAt = 0,
+  extra = {},
+} = {}) {
+  const monitoring = buildMonitoringSummary(stored, source);
+  const pagesFetched = pagination.reduce(
+    (total, entry) => total + (Number(entry.pagesFetched) || 0),
+    0,
+  );
+  const totalPages = pagination.reduce(
+    (total, entry) =>
+      total +
+      (Number(entry.totalPagesReported) || Number(entry.totalPages) || 0),
+    0,
+  );
+  const manifestOk =
+    Number(manifest?.fetched || 0) + Number(manifest?.cacheHits || 0);
+
+  return {
+    totalJamaah: stored.length,
+    syncedJamaah: rows.length,
+    inserted: Number(cache?.inserted || 0),
+    updated: Number(cache?.updated || 0),
+    documentsUpdated: Number(cache?.documentsUpdated || 0),
+    pagesFetched,
+    totalPages,
+    orders: countUniqueRows(
+      stored,
+      (row) => row.orderCode || row.kodeOrder || row.orderId,
+    ),
+    rtb: countUniqueRows(stored, (row) => row.rtb || row.noRtb),
+    syncedOrders: countUniqueRows(
+      rows,
+      (row) => row.orderCode || row.kodeOrder || row.orderId,
+    ),
+    syncedRtb: countUniqueRows(rows, (row) => row.rtb || row.noRtb),
+    complete: monitoring.complete,
+    missing: monitoring.incomplete,
+    completionRate: monitoring.completionRate,
+    manifestOk,
+    manifestFailed: Number(manifest?.failed || 0),
+    modules: [...new Set((modules || []).filter(Boolean))],
+    durationMs: startedAt ? Date.now() - startedAt : 0,
+    generatedAt: new Date().toISOString(),
+    ...extra,
+  };
+}
+
+function formatSyncSummary(summary = {}) {
+  return (
+    `${Number(summary.totalJamaah || 0).toLocaleString('id-ID')} jamaah tersimpan ` +
+    `(${Number(summary.syncedJamaah || 0).toLocaleString('id-ID')} baris sinkron) | ` +
+    `dokumen ${Number(summary.documentsUpdated || 0).toLocaleString('id-ID')} diperbarui | ` +
+    `${Number(summary.pagesFetched || 0).toLocaleString('id-ID')} halaman | ` +
+    `${Number(summary.orders || 0).toLocaleString('id-ID')} order | ` +
+    `RTB ${Number(summary.rtb || 0).toLocaleString('id-ID')} | ` +
+    `lengkap ${Number(summary.complete || 0).toLocaleString('id-ID')} / ` +
+    `missing ${Number(summary.missing || 0).toLocaleString('id-ID')}`
+  );
+}
+
+function logSyncSummary(summary = {}) {
+  console.log(`[SGO] Ringkasan sinkronisasi: ${formatSyncSummary(summary)}`);
+}
+
+function beginSyncOrConflict(res, options = {}) {
+  const current = getSyncProgress();
+  if (current.active) {
+    res.status(409).json({
+      success: false,
+      busy: true,
+      error: 'Sinkronisasi SGO sedang berjalan. Tunggu hingga selesai.',
+      progress: current,
+    });
+    return null;
+  }
+  return startSyncProgress(options);
+}
+
 app.post('/api/jamaah/upload', (req, res) => {
   return res.status(410).json({
     success: false,
@@ -229,6 +420,7 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
   const url = String(req.body?.url || '').trim();
   const cookie = String(req.body?.cookie || req.body?.cookies || '').trim();
   const requestedFocus = String(req.body?.focusModule || '').trim();
+  const enrichManifest = req.body?.skipManifest !== true;
 
   let focusModule;
   try {
@@ -241,24 +433,74 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
     });
   }
 
+  const startedAt = Date.now();
+  const started = beginSyncOrConflict(res, {
+    label: focusModule
+      ? getSgoModuleMeta(focusModule)?.label || focusModule
+      : 'Semua Modul SGO',
+    modulePath: focusModule || '',
+    modules: focusModule ? [focusModule] : SGO_MODULES,
+    message: 'Menyiapkan koneksi ke SGO Admin...',
+  });
+  if (!started) return;
+
+  // Upload Manifest adalah sumber otoritatif dokumen. Saat sync berjalan,
+  // setiap halaman langsung di-upsert ke SQLite agar kartu di UI bisa
+  // berubah merah -> hijau tanpa menunggu seluruh pagination selesai.
+  const trackLiveManifest = !focusModule || isJamaahModule(focusModule);
+  let liveSettled = false;
+  let liveResult = null;
+  const settleLiveManifest = (commit = false) => {
+    if (!trackLiveManifest || liveSettled) return liveResult;
+    liveSettled = true;
+    if (commit) {
+      liveResult = commitLiveManifestSync();
+    } else {
+      rollbackLiveManifestSync();
+      liveResult = null;
+    }
+    return liveResult;
+  };
+  if (trackLiveManifest) beginLiveManifestSync();
+
   let fast;
   try {
-    fast = await scrapeSgoModules({ url, cookie, focusModule });
+    fast = await scrapeSgoModules({
+      url,
+      cookie,
+      focusModule,
+      enrichManifest,
+      onUploadPage: trackLiveManifest
+        ? (page) => {
+            upsertLiveManifestRows(page?.rows || []);
+          }
+        : undefined,
+    });
   } catch (error) {
+    settleLiveManifest(false);
     const message = error.message || 'Gagal scrape SGO Admin';
     console.error(`[SGO] Scrape dibatalkan: ${message}`);
-    const status = error.code === 'SGO_CONFIG' || error.code === 'SGO_MODULE' ? 400 : 502;
+    failSyncProgress(message);
+    const status =
+      error.code === 'SGO_COOKIE_MISSING'
+        ? 428
+        : error.code === 'SGO_CONFIG' || error.code === 'SGO_MODULE'
+          ? 400
+          : 502;
     return res.status(status).json({
       ...buildScrapeFailurePayload({
         error: message,
         detail: message,
         focusModule,
       }),
+      code: error.code || 'SGO_ERROR',
       supportedModules: supportedModulesPayload(),
     });
   }
 
   if (fast.rows.length > 0) {
+    // Tutup transaksi live sebelum snapshot final menulis cache penuh.
+    const live = settleLiveManifest(true);
     const stored = setJamaahData(fast.rows, {
       type: fast.focus ? 'focused' : 'unified',
       // Modul non-jamaah tidak boleh menimpa data Monitoring Jamaah.
@@ -272,6 +514,27 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
     const moduleLabel = fast.focus
       ? getSgoModuleMeta(fast.focus)?.label || fast.focus
       : '';
+    updateSyncProgress({
+      phase: 'saving',
+      percent: 95,
+      message: 'Menyimpan data jamaah & cache SQLite...',
+      detail: `${jamaahList.length.toLocaleString('id-ID')} jamaah`,
+      rows: jamaahList.length,
+    });
+    const cache = ensureManifestCache({ force: true });
+    const summary = buildSyncSummary({
+      rows: fast.rows,
+      stored,
+      pagination: fast.pagination || [],
+      manifest: fast.manifestEnrichment,
+      source: getJamaahSource(),
+      cache,
+      modules: fast.modulesVisited,
+      startedAt,
+      extra: live?.documentsUpdated
+        ? { documentsUpdated: live.documentsUpdated }
+        : {},
+    });
     console.log(
       `[SGO] Data jamaah berhasil dimuat: ${jamaahList.length} jamaah | ` +
         `NIK ${fieldCoverage.nik || 0} | Paspor ${fieldCoverage.passport || 0} | ` +
@@ -280,6 +543,20 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         `${pagesFetched} halaman.`,
     );
     console.log(`[SGO] Total jamaah tersimpan: ${jamaahList.length}`);
+    logSyncSummary(summary);
+    finishSyncProgress({
+      message:
+        `Sinkronisasi selesai: ${jamaahList.length.toLocaleString('id-ID')} jamaah, ` +
+        `${summary.documentsUpdated.toLocaleString('id-ID')} status dokumen diperbarui.`,
+      detail:
+        `${Number(summary.manifestOk || 0).toLocaleString('id-ID')} manifest OK • ` +
+        `${Number(summary.manifestFailed || 0).toLocaleString('id-ID')} gagal`,
+      summary,
+      rows: jamaahList.length,
+      documentsUpdated: summary.documentsUpdated,
+      pagesFetched: summary.pagesFetched,
+      totalPages: summary.totalPages,
+    });
 
     return res.json({
       success: true,
@@ -300,6 +577,14 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       fieldCoverage,
       manifest: fast.manifestEnrichment || null,
       pagination: fast.pagination || null,
+      syncSummary: summary,
+      cache: {
+        total: cache.total,
+        inserted: cache.inserted || 0,
+        updated: cache.updated || 0,
+        documentsUpdated: cache.documentsUpdated || 0,
+        syncedAt: cache.syncedAt,
+      },
       modules: fast.modulesVisited,
       modulesFailed: fast.modulesFailed,
       totalModules: fast.focus ? fast.modulePaths.length : SGO_MODULES.length,
@@ -311,6 +596,9 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
     });
   }
 
+  // Tidak ada baris jamaah: buang perubahan live agar cache tidak parsial.
+  settleLiveManifest(false);
+
   // Halaman operasional (Hotel, Stock, Travel Docs, Upload Documents) tetap
   // dianggap berhasil dimuat walau tidak memiliki tabel jamaah.
   if (
@@ -319,7 +607,23 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
     fast.modulesVisited.includes(focusModule)
   ) {
     console.log(`[SGO] Modul ${focusModule} dimuat tanpa tabel jamaah.`);
-    return res.json(buildModuleLoadedPayload(fast, focusModule));
+    const summary = buildSyncSummary({
+      rows: fast.rows,
+      stored: getActiveJamaah(),
+      pagination: fast.pagination || [],
+      source: getJamaahSource(),
+      modules: fast.modulesVisited,
+      startedAt,
+      extra: { moduleLoaded: true },
+    });
+    finishSyncProgress({
+      message: `Modul ${getSgoModuleMeta(focusModule)?.label || focusModule} dimuat.`,
+      summary,
+    });
+    return res.json({
+      ...buildModuleLoadedPayload(fast, focusModule),
+      syncSummary: summary,
+    });
   }
 
   const failureReason =
@@ -332,6 +636,12 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
   if (!fast.authError && fast.focus) {
     try {
       console.log('[SGO] Menjalankan fallback Puppeteer untuk mengambil ulang data real...');
+      updateSyncProgress({
+        phase: 'browser',
+        percent: 70,
+        message: 'Mencoba jalur browser SGO (Puppeteer)...',
+        detail: 'Fetch cepat tidak menghasilkan data',
+      });
       const browserResult = await scrapeSgoWithBrowser({ url, cookie, focusModule });
       if (browserResult.rows.length > 0) {
         const stored = setJamaahData(browserResult.rows, {
@@ -341,11 +651,28 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         });
         const jamaahList = formatJamaahList(stored);
         const fieldCoverage = getJamaahSource()?.fieldCoverage || {};
+        const cache = ensureManifestCache({ force: true });
+        const summary = buildSyncSummary({
+          rows: browserResult.rows,
+          stored,
+          pagination: browserResult.pagination || [],
+          manifest: browserResult.manifestEnrichment,
+          source: getJamaahSource(),
+          cache,
+          modules: browserResult.modulesVisited,
+          startedAt,
+          extra: { fallback: 'puppeteer' },
+        });
         console.log(
           `[SGO] Data jamaah berhasil dimuat (Puppeteer): ${jamaahList.length} jamaah | ` +
             `NIK ${fieldCoverage.nik || 0} | Paspor ${fieldCoverage.passport || 0}.`,
         );
         console.log(`[SGO] Puppeteer berhasil: ${jamaahList.length} jamaah.`);
+        logSyncSummary(summary);
+        finishSyncProgress({
+          message: `Sinkronisasi selesai (browser): ${jamaahList.length.toLocaleString('id-ID')} jamaah.`,
+          summary,
+        });
         return res.json({
           success: true,
           fallback: false,
@@ -362,6 +689,14 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
           source: getJamaahSource(),
           fieldCoverage,
           manifest: browserResult.manifestEnrichment || null,
+          syncSummary: summary,
+          cache: {
+            total: cache.total,
+            inserted: cache.inserted || 0,
+            updated: cache.updated || 0,
+            documentsUpdated: cache.documentsUpdated || 0,
+            syncedAt: cache.syncedAt,
+          },
           modules: browserResult.modulesVisited,
           modulesFailed: [...new Set([...fast.modulesFailed, ...browserResult.modulesFailed])],
           totalModules: 1,
@@ -382,9 +717,26 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
   // hasil kosong yang jujur, bukan data lama atau data karangan.
   if (!fast.authError && focusModuleLoaded(fast, focusModule)) {
     console.warn('[SGO] SGO diakses tetapi tidak ada baris jamaah pada hasil scrape.');
-    return res.json(buildEmptyScrapePayload({ result: fast, focusModule }));
+    const summary = buildSyncSummary({
+      rows: fast.rows,
+      stored: getActiveJamaah(),
+      pagination: fast.pagination || [],
+      source: getJamaahSource(),
+      modules: fast.modulesVisited,
+      startedAt,
+      extra: { empty: true },
+    });
+    finishSyncProgress({
+      message: 'SGO berhasil diakses, tetapi tidak ada baris jamaah.',
+      summary,
+    });
+    return res.json({
+      ...buildEmptyScrapePayload({ result: fast, focusModule }),
+      syncSummary: summary,
+    });
   }
 
+  failSyncProgress(failureReason);
   const status = fast.authError ? 401 : 502;
   return res.status(status).json({
     ...buildScrapeFailurePayload({
@@ -395,12 +747,178 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       focusModule,
       errors: fast.errors,
     }),
+    code: fast.authError?.code || 'SGO_ERROR',
     supportedModules: supportedModulesPayload(),
   });
 });
 
 /**
- * Fetch ringan (tanpa Puppeteer) memakai cookie dari process.env.SGO_ADMIN_SESSION.
+ * Status sinkronisasi SGO in-memory untuk progress bar real-time.
+ * Polling ringan; tidak memuat data pribadi.
+ */
+app.get('/api/jamaah/scrape-progress', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  return res.json({ success: true, progress: getSyncProgress() });
+});
+
+/**
+ * Sinkronisasi ulang satu jamaah langsung dari Upload Manifest SGO.
+ * Body: { id, query?, url?, cookie? }. `id` adalah manifestId/jamaahId yang
+ * dipakai kartu manifest. Status dokumen, RTB, dan keberangkatan selalu
+ * ditimpa data SGO terbaru.
+ */
+app.post('/api/jamaah/sync-one', async (req, res) => {
+  const id = String(
+    req.body?.id || req.body?.manifestId || req.body?.jamaahId || '',
+  ).trim();
+  const url = String(req.body?.url || '').trim();
+  const cookie = String(req.body?.cookie || '').trim();
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      error: 'ID jamaah wajib diisi.',
+    });
+  }
+
+  const existing = findJamaahById(id);
+  if (!existing) {
+    return res.status(404).json({
+      success: false,
+      error:
+        'Jamaah tidak ditemukan di cache lokal. Jalankan sinkronisasi penuh terlebih dahulu.',
+    });
+  }
+
+  const startedAt = Date.now();
+  const started = beginSyncOrConflict(res, {
+    label: `Sinkronisasi ${existing.nama || 'Jamaah'}`,
+    modulePath: '/ops/upload-documents',
+    modules: ['/ops/upload-documents'],
+    message: `Mencari ${existing.nama || 'jamaah'} di SGO...`,
+  });
+  if (!started) return;
+
+  const query =
+    String(req.body?.query || '').trim() ||
+    existing.orderCode ||
+    existing.kodeOrder ||
+    existing.orderId ||
+    existing.nama;
+
+  try {
+    const result = await fetchSingleJamaahFromSgo({
+      url,
+      cookie,
+      query,
+      hints: {
+        manifestId: existing.manifestId || existing.jamaahId || id,
+        orderCode: existing.orderCode || existing.kodeOrder || existing.orderId,
+        nama: existing.nama,
+      },
+      maxPages: 4,
+    });
+
+    if (!result.match) {
+      const message =
+        `SGO tidak menemukan ${existing.nama || 'jamaah'} ` +
+        `(kata kunci: ${query}). Status lama tidak diubah.`;
+      failSyncProgress(message);
+      return res.status(404).json({
+        success: false,
+        error: message,
+        progress: getSyncProgress(),
+      });
+    }
+
+    updateSyncProgress({
+      phase: 'saving',
+      percent: 95,
+      message: `Menyimpan status dokumen ${existing.nama || 'jamaah'}...`,
+      detail: result.match.dokumen || 'Upload Manifest',
+    });
+
+    const upsert = upsertJamaahRows([result.match], {
+      type: 'single-sync',
+      replaceDocuments: true,
+      modules: ['/ops/upload-documents'],
+      url: result.config.baseUrl,
+    });
+    const cache = ensureManifestCache({ force: true });
+    const stored = getJamaahData();
+    const updated =
+      findJamaahById(result.match.manifestId || id) ||
+      stored.find(
+        (row) =>
+          String(row.orderCode || '').toUpperCase() ===
+            String(result.match.orderCode || '').toUpperCase() &&
+          String(row.nama || '').toLowerCase() ===
+            String(result.match.nama || '').toLowerCase(),
+      ) ||
+      existing;
+
+    const safe = buildSafeJamaahRow(updated, 0);
+    const summary = buildSyncSummary({
+      rows: [result.match],
+      stored,
+      pagination: [result.pagination].filter(Boolean),
+      source: getJamaahSource(),
+      cache,
+      modules: ['/ops/upload-documents'],
+      startedAt,
+      extra: {
+        target: {
+          id: updated.manifestId || updated.jamaahId || id,
+          nama: safe.nama,
+          orderCode: safe.orderCode,
+          progressLabel: safe.progressLabel,
+          isComplete: safe.isComplete,
+        },
+      },
+    });
+    logSyncSummary(summary);
+    finishSyncProgress({
+      message:
+        `${safe.nama}: ${safe.progressLabel} dokumen terisi` +
+        (safe.isComplete ? ' (lengkap).' : `, ${safe.missing.length} belum ada.`),
+      summary,
+    });
+
+    return res.json({
+      success: true,
+      message: `Status dokumen ${safe.nama} diperbarui dari SGO.`,
+      jamaah: {
+        ...safe,
+        id: updated.manifestId || updated.jamaahId || safe.id,
+        manifestId: updated.manifestId || '',
+        jamaahId: updated.jamaahId || '',
+      },
+      upsert,
+      cache: {
+        total: cache.total,
+        inserted: cache.inserted || 0,
+        updated: cache.updated || 0,
+        documentsUpdated: cache.documentsUpdated || 0,
+        syncedAt: cache.syncedAt,
+      },
+      syncSummary: summary,
+      pagination: result.pagination || null,
+    });
+  } catch (error) {
+    const message = error.message || 'Sinkronisasi satu jamaah gagal.';
+    console.error(`[SGO] Sync satu jamaah gagal: ${message}`);
+    failSyncProgress(message);
+    const status = error.code === 'SGO_COOKIE_MISSING' ? 428 : 502;
+    return res.status(status).json({
+      success: false,
+      code: error.code || 'SGO_ERROR',
+      error: message,
+    });
+  }
+});
+
+/**
+ * Fetch ringan (tanpa Puppeteer) memakai cookie SGO perangkat.
  * Body opsional: { modulePath, url }
  */
 app.post('/api/jamaah/fetch-env', async (req, res) => {
@@ -431,6 +949,7 @@ app.post('/api/jamaah/fetch-env', async (req, res) => {
       });
       const jamaahList = formatJamaahList(stored);
       const fieldCoverage = getJamaahSource()?.fieldCoverage || {};
+      ensureManifestCache({ force: true });
       console.log(
         `[SGO] Data jamaah berhasil dimuat (fetch-env ${modulePath}): ` +
           `${jamaahList.length} jamaah | NIK ${fieldCoverage.nik || 0} | ` +
@@ -489,17 +1008,24 @@ app.post('/api/jamaah/fetch-env', async (req, res) => {
         errors: result.errors,
       }),
       targetUrl: `${result.config.baseUrl}${modulePath}`,
+      code: result.authError?.code || 'SGO_ERROR',
       supportedModules: supportedModulesPayload(),
     });
   } catch (error) {
     console.error('[jamaah/fetch-env]', error.message);
-    const status = error.code === 'SGO_CONFIG' || error.code === 'SGO_MODULE' ? 400 : 502;
+    const status =
+      error.code === 'SGO_COOKIE_MISSING'
+        ? 428
+        : error.code === 'SGO_CONFIG' || error.code === 'SGO_MODULE'
+          ? 400
+          : 502;
     return res.status(status).json({
       ...buildScrapeFailurePayload({
         error: error.message || 'Gagal fetch SGO Admin',
         detail: error.message || 'Gagal fetch SGO Admin',
         focusModule: modulePath,
       }),
+      code: error.code || 'SGO_ERROR',
       supportedModules: supportedModulesPayload(),
     });
   }
@@ -507,6 +1033,7 @@ app.post('/api/jamaah/fetch-env', async (req, res) => {
 
 app.post('/api/jamaah/clear', (req, res) => {
   clearJamaahData('POST /api/jamaah/clear');
+  resetSyncProgress();
   res.json({
     success: true,
     count: 0,
@@ -540,6 +1067,122 @@ app.get('/api/sgo/modules', (req, res) => {
     success: true,
     total: SGO_MODULE_OPTIONS.length,
     modules: supportedModulesPayload(),
+  });
+});
+
+app.get('/api/sgo/cookie', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const active = Boolean(getRequestSgoCookieHeader());
+  return res.json(sgoCookieStatusPayload(active));
+});
+
+app.post('/api/sgo/cookie', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const raw = String(req.body?.cookie ?? req.body?.cookies ?? '').trim();
+  const sessionCookie = toSgoSessionCookieHeader(raw);
+
+  if (!sessionCookie) {
+    return res.status(400).json({
+      success: false,
+      code: 'SGO_COOKIE_INVALID',
+      error:
+        'Cookie SGO tidak valid. Tempel nilai sgo_admin_session=... atau token sesi dari SGO Admin.',
+    });
+  }
+
+  if (sessionCookie.length > 4096) {
+    return res.status(400).json({
+      success: false,
+      code: 'SGO_COOKIE_TOO_LARGE',
+      error: 'Cookie SGO terlalu panjang. Tempel hanya pasangan sgo_admin_session.',
+    });
+  }
+
+  res.cookie(
+    SGO_DEVICE_COOKIE_NAME,
+    sessionCookie,
+    sgoDeviceCookieOptions({ secure: req.secure }),
+  );
+  return res.json(
+    sgoCookieStatusPayload(true, 'Cookie SGO tersimpan di perangkat ini.'),
+  );
+});
+
+app.delete('/api/sgo/cookie', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.clearCookie(SGO_DEVICE_COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: Boolean(req.secure),
+    path: '/',
+  });
+  return res.json(
+    sgoCookieStatusPayload(false, 'Cookie SGO dihapus dari perangkat ini.'),
+  );
+});
+
+app.post('/api/sgo/cookie/test', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const raw = String(req.body?.cookie ?? req.body?.cookies ?? '').trim();
+  const candidate = raw ? toSgoSessionCookieHeader(raw) : '';
+  const saved = getRequestSgoCookieHeader();
+
+  if (raw && !candidate) {
+    return res.status(400).json({
+      success: false,
+      active: Boolean(saved),
+      state: saved ? 'active' : 'empty',
+      code: 'SGO_COOKIE_INVALID',
+      error:
+        'Cookie SGO tidak valid. Tempel nilai sgo_admin_session=... atau token sesi dari SGO Admin.',
+    });
+  }
+
+  const cookie = candidate || saved;
+  if (!cookie) {
+    return res.status(428).json({
+      success: false,
+      active: false,
+      state: 'empty',
+      tested: 'saved',
+      code: 'SGO_COOKIE_MISSING',
+      error:
+        'Cookie SGO belum diatur di perangkat ini. Tempel cookie lalu klik Simpan Cookie.',
+    });
+  }
+
+  const result = await verifySgoCookie({ url: req.body?.url, cookie });
+  const tested = candidate ? 'candidate' : 'saved';
+
+  if (!result.ok) {
+    const status =
+      result.code === 'SGO_AUTH' || result.code === 'SGO_COOKIE_MISSING'
+        ? 401
+        : result.code === 'SGO_TIMEOUT'
+          ? 504
+          : 502;
+    return res.status(status).json({
+      success: false,
+      active: Boolean(saved),
+      state:
+        !candidate && result.code === 'SGO_AUTH'
+          ? 'expired'
+          : saved
+            ? 'active'
+            : 'empty',
+      tested,
+      code: result.code,
+      error: result.message,
+    });
+  }
+
+  return res.json({
+    success: true,
+    active: Boolean(saved),
+    state: saved ? 'active' : 'empty',
+    tested,
+    message: result.message,
+    status: result.status,
   });
 });
 
@@ -678,8 +1321,14 @@ app.post('/api/chat', async (req, res) => {
       String(result?.reply || '').trim() ||
       'Maaf, saya belum bisa menjawab pesan itu. Silakan coba lagi.';
     const bridgeResult = buildChatJamaahResults(message, result);
+    const addonResult = searchAddonsForChat(message);
+    const addonReply = formatAddonChatReply(addonResult);
+    const addonPreferred =
+      Boolean(addonReply) && /\b(add[\s-]?ons?|tambahan)\b/i.test(message);
     const exactOrder = bridgeResult?.exactOrder === true;
-    const reply = exactOrder && bridgeResult.reply ? bridgeResult.reply : aiReply;
+    const bridgeReply =
+      exactOrder && bridgeResult.reply ? bridgeResult.reply : aiReply;
+    const reply = addonPreferred ? addonReply : bridgeReply;
 
     let jamaahResults = null;
     if (bridgeResult) {
@@ -694,21 +1343,37 @@ app.post('/api/chat', async (req, res) => {
       reply,
       response: reply,
       message: reply,
-      intent: exactOrder ? 'data-lookup' : result.intent,
-      source: exactOrder ? 'jamaah-data' : result.source,
-      provider: exactOrder
+      intent: addonPreferred
+        ? 'addon-lookup'
+        : exactOrder
+          ? 'data-lookup'
+          : result.intent,
+      source: addonPreferred
+        ? 'addon-data'
+        : exactOrder
+          ? 'jamaah-data'
+          : result.source,
+      provider: addonPreferred
         ? 'sgo'
-        : result.source === 'gemini'
-          ? 'gemini'
-          : result.source === 'jamaah-data'
-            ? 'sgo'
-            : 'local',
+        : exactOrder
+          ? 'sgo'
+          : result.source === 'gemini'
+            ? 'gemini'
+            : result.source === 'jamaah-data'
+              ? 'sgo'
+              : 'local',
       model: result.model || null,
-      usedJamaahLookup: exactOrder ? true : Boolean(result.usedJamaahLookup),
-      matchedCount: exactOrder
-        ? bridgeResult.totalMatched
-        : result.matchedCount ?? null,
+      usedJamaahLookup:
+        addonPreferred || exactOrder
+          ? true
+          : Boolean(result.usedJamaahLookup),
+      matchedCount: addonPreferred
+        ? addonResult?.totalMatched ?? null
+        : exactOrder
+          ? bridgeResult.totalMatched
+          : result.matchedCount ?? null,
       jamaahResults,
+      addonResults: addonResult || null,
       latencyMs: result.latencyMs ?? null,
     });
   } catch (error) {
@@ -769,11 +1434,10 @@ const server = app.listen(PORT, () => {
     `   SGO Raw  : ${rawStored}/${SGO_RAW_MODULES.length} respons modul tersimpan`,
   );
   console.log(
-    `   SGO Cookie: ${envSessionLength ? `SET (.env, ${envSessionLength} karakter)` : 'NOT SET (.env)'}`,
+    `   SGO Cookie: per perangkat via tombol Cookie SGO${envSessionLength ? ` | .env portal tersedia (${envSessionLength} karakter)` : ''}`,
   );
-  if (!envSessionLength) validateSgoEnv();
   console.log(
-    `   Endpoints: POST /api/chat | GET /api/jamaah | GET /api/monitoring/summary | GET /api/manifest/docs | POST /api/jamaah/scrape-cookie`,
+    `   Endpoints: POST /api/chat | POST /api/message/rapihin | GET /api/jamaah | GET /api/monitoring/summary | GET /api/manifest/docs | POST /api/jamaah/scrape-cookie`,
   );
   console.log(`   Health   : GET /api/health\n`);
 });
