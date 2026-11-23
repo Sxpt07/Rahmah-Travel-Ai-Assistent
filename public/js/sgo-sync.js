@@ -149,14 +149,14 @@
     panel.dataset.syncHideTimer = String(timer);
   }
 
-  function setButtonBusy(button, busy, label = 'Menyinkronkan...') {
+  function setButtonBusy(button, busy, label = 'Menyinkronkan...', disableButton = true) {
     if (!button) return;
 
     if (busy) {
       if (!button.dataset.syncOriginal) {
         button.dataset.syncOriginal = button.innerHTML;
       }
-      button.disabled = true;
+      button.disabled = Boolean(disableButton);
       button.setAttribute('aria-busy', 'true');
 
       const spinner = document.createElement('span');
@@ -248,6 +248,7 @@
     label = 'Sinkronisasi SGO',
     busyLabel = 'Menyinkronkan...',
     autoHideMs = HIDE_DELAY_MS,
+    disableButton = true,
     onProgress,
     onComplete,
     onError,
@@ -262,7 +263,7 @@
       message: 'Menghubungi SGO Admin...',
       detail: 'Progress akan bertambah sesuai halaman yang selesai diproses.',
     });
-    setButtonBusy(button, true, busyLabel);
+    setButtonBusy(button, true, busyLabel, disableButton);
 
     const requestStartedAt = Date.now();
     let lastProgress = null;

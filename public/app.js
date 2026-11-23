@@ -548,6 +548,11 @@ async function handleJamaahCookieScrape() {
   sgoBatchState.stop = false;
   if (moduleSelectEl) moduleSelectEl.disabled = true;
   setModuleMenuDisabled(true);
+  if (jamaahCookieBtn) {
+    jamaahCookieBtn.dataset.syncOriginal = jamaahCookieBtn.innerHTML;
+    jamaahCookieBtn.innerHTML = '<i data-lucide="square" class="h-3 w-3 text-red-400"></i><span>Stop Sync</span>';
+    if (window.lucide) lucide.createIcons();
+  }
 
   try {
     while (hasMore) {
@@ -572,6 +577,7 @@ async function handleJamaahCookieScrape() {
         label: `${moduleLabel}${isManifestFocus ? ` (Batch ${batchCount}, halaman ${startPage})` : ''}`,
         busyLabel: sgoBatchState.stop ? 'Menghentikan...' : `Memuat ${moduleLabel}...`,
         autoHideMs: isManifestFocus ? 2000 : 15000,
+        disableButton: false,
         onProgress: isManifestFocus
           ? (progress) => {
               document.dispatchEvent(
@@ -681,6 +687,10 @@ async function handleJamaahCookieScrape() {
     sgoBatchState.stop = false;
     if (moduleSelectEl) moduleSelectEl.disabled = false;
     setModuleMenuDisabled(false);
+    if (jamaahCookieBtn && jamaahCookieBtn.dataset.syncOriginal) {
+      jamaahCookieBtn.innerHTML = jamaahCookieBtn.dataset.syncOriginal;
+      delete jamaahCookieBtn.dataset.syncOriginal;
+    }
     updateScrapeButtonLabel();
     if (window.lucide) lucide.createIcons();
   }
