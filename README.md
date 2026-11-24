@@ -57,7 +57,8 @@ GEMINI_FALLBACK_MODEL=gemini-3.8-flash,gemini-flash-latest
 SGO_BASE_URL=https://sgo.rahmahgrup.id
 SGO_ADMIN_SESSION=your_sgo_admin_session
 SGO_PAGINATION_DELAY_MS=500
-SGO_PAGINATION_MAX_PAGES=100
+SGO_BATCH_PAGES=2
+SGO_MANIFEST_BATCH_SIZE=50
 SGO_RAW_DIR=sgo_raw
 ```
 
@@ -133,17 +134,17 @@ mengisi `jamaahStore`; modul lain menampilkan ringkasan halamannya.
 > `.gitignore`, dan jangan di-commit. Jika store kosong, terminal menampilkan
 > peringatan agar Monitoring Jamaah di-scrape ulang.
 >
-> Scraper Monitoring Jamaah mengambil **semua halaman**: halaman 1 memakai URL
-> asli, halaman 2 dan seterusnya memakai `?page=N` dengan jeda default 500 ms.
-> Loop berhenti otomatis saat halaman kosong, HTML/baris berulang (server
-> mengabaikan parameter `page`), terjadi error, atau batas
-> `SGO_PAGINATION_MAX_PAGES` tercapai. Semua baris digabung dan di-dedupe,
-> lalu disimpan **sekali** ke `jamaah_data.json`, sehingga pencarian membaca
-> total data dari seluruh halaman.
+> Sinkronisasi berjalan dua tahap dari satu klik. Tahap 1 mengambil **semua
+> halaman** sampai SGO melaporkan halaman terakhir: halaman 1 memakai URL asli,
+> halaman 2 dan seterusnya memakai `?page=N` dengan jeda default 500 ms. Frontend
+> meminta 1–2 halaman per request, menggabungkan hasilnya, dan terus melanjutkan
+> sampai `hasMore: false`. Tahap 2 memvalidasi NIK/paspor seluruh jamaah yang
+> tersimpan lewat `/api/jamaah/validate-manifest` dalam batch 25–50 record per
+> request. Kedua tahap menampilkan progres `X / total` secara live dan bisa
+> dihentikan/dilanjutkan.
 >
-> Setiap scrape Monitoring Jamaah juga mengambil NIK/paspor dari halaman
-> manifest per jamaah. Ringkasan `fieldCoverage` (`nik`, `passport`,
-> `manifestId`) dikembalikan di response dan ditampilkan di banner startup.
+> Ringkasan `fieldCoverage` (`nik`, `passport`, `manifestId`) dikembalikan di
+> response dan ditampilkan di banner startup.
 > Respons HTML asli untuk `/ops/monitoring-jamaah`, `/ops/upload-documents`,
 > `/ops/travel-docs`, `/ops/stock-perlengkapan`, dan `/ops/hotel` disimpan di
 > `sgo_raw/` (bisa diubah lewat `SGO_RAW_DIR`). Folder ini juga berisi PII dan
@@ -357,9 +358,10 @@ Scrape satu modul SGO fokus, atau seluruh 16 modul sekaligus bila
   dibatasi 5–60 detik).
 - Pagination hanya untuk modul sumber jamaah. Halaman 2+ memakai parameter
   `SGO_PAGE_PARAM` (default `page`) dan diberi jeda
-  `SGO_PAGINATION_DELAY_MS` (default `500`). Batas halaman
-  `SGO_PAGINATION_MAX_PAGES` (default `100`). Response menyertakan objek
-  `pagination` berisi `pagesFetched`, `rows`, dan `stopReason`
+  `SGO_PAGINATION_DELAY_MS` (default `500`). Tidak ada batas jumlah halaman;
+  loop berhenti saat SGO melaporkan halaman terakhir atau tidak ada halaman
+  berikutnya. Response menyertakan objek `pagination` berisi `pagesFetched`,
+  `rows`, `totalPagesReported`, `nextPage`, `hasMore`, dan `stopReason`
   (`empty-page`, `duplicate-page`, `no-new-rows`, `auth-error`, dst.).
 - Jika cookie dari UI gagal, server otomatis retry sekali memakai
   `SGO_ADMIN_SESSION` dari `.env` dan menandai `usedEnvCookie: true`.
@@ -371,8 +373,8 @@ Scrape satu modul SGO fokus, atau seluruh 16 modul sekaligus bila
   "success": true,
   "fallback": false,
   "empty": false,
-  "count": 400,
-  "storedJamaahCount": 400,
+  "count": 3120,
+  "storedJamaahCount": 3120,
   "focusModule": "/ops/monitoring-jamaah",
   "modules": ["/ops/monitoring-jamaah"],
   "modulesFailed": [],
@@ -381,13 +383,13 @@ Scrape satu modul SGO fokus, atau seluruh 16 modul sekaligus bila
     "enabled": true,
     "pagesFetched": 1,
     "pagesWithRows": 1,
-    "rows": 400,
+    "rows": 3120,
     "stopReason": "duplicate-page"
   },
   "rawResponse": {
     "modulePath": "/ops/monitoring-jamaah",
     "lastAttempt": { "ok": true, "status": 200 },
-    "response": { "status": 200, "rows": 400, "htmlLength": 123456 }
+    "response": { "status": 200, "rows": 3120, "htmlLength": 123456 }
   },
   "jamaahList": [
     {
@@ -424,8 +426,8 @@ Halaman yang berhasil dimuat dikembalikan sebagai:
     "stats": [],
     "preview": "..."
   },
-  "count": 400,
-  "storedJamaahCount": 400,
+  "count": 3120,
+  "storedJamaahCount": 3120,
   "jamaahList": [],
   "rawResponse": {
     "modulePath": "/ops/hotel",
@@ -562,14 +564,20 @@ POST /api/jamaah/scrape-cookie | /api/jamaah/fetch-env
        jika cookie UI gagal / 0 baris → retry SEKALI dengan cookie `.env`
        resolveSgoModule(): hanya 16 endpoint resmi; lainnya `400 SGO_MODULE`
        extractSgoOrders(): pasangan baris order + baris jamaah
-       → hanya baris ber-kode order yang disimpan (400 jamaah bersih)
+       → semua halaman digabung dan di-dedupe, tanpa batas 400 atau 20 halaman
        → setiap jamaah menyimpan manifestId dari `data-mj-open`
-       → enrichJamaahWithManifest(): buka /ops/monitoring-jamaah/{id}/edit?embed=1
-           no_identitas → NIK (hanya jika identity_type=nik; kitas/kitap tidak)
-           no_paspor → paspor; juga no_hp, tempat/tanggal lahir, kota/expired paspor
-           concurrency 8, timeout 20 dtk, retry 1x, cache 5 menit
-           manifestFetched=true; NIK/paspor lama hanya dipertahankan bila fetch gagal
-       → Monitoring Jamaah: setJamaahData() → response `jamaahList`
+       → frontend mengulang 1–2 halaman/request sampai hasMore=false
+       → setJamaahData()/upsertJamaahRows() menulis semua baris ke jamaah_data.json
+
+POST /api/jamaah/validate-manifest
+  └─ server.js + enrichJamaahWithManifest()
+       → frontend mengulang 25–50 record/request sampai hasMore=false
+       → buka /ops/monitoring-jamaah/{id}/edit?embed=1
+       → no_identitas → NIK (hanya jika identity_type=nik; kitas/kitap tidak)
+       → no_paspor → paspor; juga no_hp, tempat/tanggal lahir, kota/expired paspor
+       → retry otomatis untuk manifest gagal, cache 5 menit
+       → upsertJamaahRows() menyimpan NIK/paspor ke store + cache SQLite
+       → response `validation` berisi total, nextIndex, hasMore, ok, failed
        → setJamaahData() menulis atomik ke jamaah_data.json + fieldCoverage
        → modul operasional: `moduleLoaded` + `moduleSummary`, data lama tetap
        → lima modul terpilih: saveSgoRawResponse() → sgo_raw/*.json (HTML asli)
@@ -630,15 +638,16 @@ POST /api/chat
 | `SGO_ADMIN_SESSION` | — | Cookie sesi admin SGO |
 | `JAMAAH_DATA_FILE` | `jamaah_data.json` (root backend) | Lokasi file penyimpanan permanen hasil scrape |
 | `SGO_REQUEST_TIMEOUT_MS` | `20000` | Timeout fetch per modul SGO (5–60 detik) |
-| `SGO_PAGINATION_ENABLED` | `true` | Pagination modul Monitoring Jamaah |
+| `SGO_PAGINATION_ENABLED` | `true` | Pagination modul sumber jamaah |
 | `SGO_PAGINATION_DELAY_MS` | `500` | Jeda antar-fetch halaman (0–10000 ms) |
-| `SGO_PAGINATION_MAX_PAGES` | `100` | Batas maksimum halaman yang diprobe (1–500) |
 | `SGO_PAGE_PARAM` | `page` | Nama parameter query halaman SGO |
+| `SGO_BATCH_PAGES` | `2` | Jumlah halaman per request scrape (1–2) |
+| `SGO_SCRAPE_BUDGET_MS` | `22000` di Vercel | Anggaran waktu per request batch |
+| `SGO_MANIFEST_BATCH_SIZE` | `50` | Jumlah record per request validasi manifest (25–50) |
 | `SGO_RAW_DIR` | `sgo_raw` (root backend) | Folder respons mentah 5 modul SGO (PII, ignored) |
 | `SGO_MANIFEST_CONCURRENCY` | `8` | Jumlah manifest jamaah yang di-fetch paralel (1–20) |
 | `SGO_MANIFEST_TIMEOUT_MS` | `20000` | Timeout per halaman manifest (5–60 detik) |
 | `SGO_MANIFEST_CACHE_MS` | `300000` | Cache in-memory NIK/paspor per manifest (5 menit) |
-| `SGO_MANIFEST_RETRY_MAX` | `300` | Maksimum manifest gagal yang dicoba ulang di pass kedua (1–3500) |
 | `SGO_MANIFEST_RETRY_CONCURRENCY` | `2` | Concurrency pass retry manifest (1–10) |
 | `SCRAPER_MAX_CHARS` | `30000` | Context size cap |
 | `SCRAPER_TIMEOUT_MS` | `20000` | Website fetch timeout |
@@ -674,8 +683,8 @@ kembalikan `seats: []` dan pesan error; jangan mengisi dengan data contoh.
 
 - Hasil scrape jamaah disimpan permanen di `jamaah_data.json` dan dipulihkan saat restart. Web context lain masih **in-memory**; untuk multi-instance gunakan Redis/Postgres.
 - Respons mentah lima modul SGO disimpan di `sgo_raw/` dan dimuat ulang saat dibutuhkan. Folder ini **wajib di-ignore** dan dibatasi aksesnya.
-- Scrape penuh Monitoring Jamaah menambah satu request manifest per jamaah (±400 request). Atur `SGO_MANIFEST_CONCURRENCY`, `SGO_MANIFEST_TIMEOUT_MS`, dan `SGO_MANIFEST_CACHE_MS` bila server SGO membatasi trafik. Manifest yang gagal otomatis dicoba ulang satu pass dengan concurrency lebih rendah dan backoff (lihat `SGO_MANIFEST_RETRY_MAX` dan `SGO_MANIFEST_RETRY_CONCURRENCY`); detail kegagalan akhir tersedia di `manifest.failures` pada respons sync.
-- Pagination Monitoring Jamaah menambah request halaman berurutan (`?page=2`, `?page=3`, dst.). Atur `SGO_PAGINATION_DELAY_MS` (default 500 ms) dan `SGO_PAGINATION_MAX_PAGES` bila server SGO membatasi trafik atau jumlah halaman bertambah.
+- Validasi NIK/paspor berjalan sebagai tahap terpisah: 25–50 manifest per request lewat `/api/jamaah/validate-manifest`. Atur `SGO_MANIFEST_BATCH_SIZE`, `SGO_MANIFEST_CONCURRENCY`, `SGO_MANIFEST_TIMEOUT_MS`, dan `SGO_MANIFEST_CACHE_MS` bila server SGO membatasi trafik. Manifest yang gagal otomatis dicoba ulang dengan concurrency lebih rendah dan backoff (lihat `SGO_MANIFEST_RETRY_CONCURRENCY`); detail kegagalan akhir tersedia di `manifest.failures` pada respons validasi.
+- Pagination meminta 1–2 halaman per request (`?page=2`, `?page=3`, dst.) sampai halaman terakhir. Atur `SGO_BATCH_PAGES` (1–2), `SGO_PAGINATION_DELAY_MS` (default 500 ms), dan `SGO_SCRAPE_BUDGET_MS` bila server SGO atau serverless membatasi trafik/waktu.
 - `jamaah_data.json` dan `sgo_raw/*.json` berisi data pribadi jamaah. Jangan di-commit, batasi akses folder, dan terapkan retensi/penghapusan sesuai kebijakan privasi.
 - Add authentication/rate limiting before exposing publicly; CORS is currently open.
 - Scraping must respect each website's Terms of Service and `robots.txt`.

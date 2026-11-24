@@ -61,12 +61,21 @@ export const SGO_BROWSER_HEADERS = Object.freeze({
 });
 
 const VERCEL_RUNTIME = isVercelRuntime();
-const SCRAPE_DEADLINE_MS = Math.max(
+const SCRAPE_BUDGET_MS = Math.max(
   15000,
+  Math.min(envNumber('SGO_SCRAPE_BUDGET_MS', VERCEL_RUNTIME ? 22000 : 10 * 60 * 1000), 300000),
+);
+const SCRAPE_DEADLINE_MS = Math.max(
+  SCRAPE_BUDGET_MS,
   Math.min(envNumber('SGO_SCRAPE_DEADLINE_MS', VERCEL_RUNTIME ? 300000 : 10 * 60 * 1000), 300000),
 );
-const VERCEL_MANIFEST_MAX = Math.max(0, Math.min(envNumber('SGO_VERCEL_MANIFEST_MAX', 120), 3500));
-const VERCEL_UPLOAD_MAX_PAGES = Math.max(1, Math.min(envNumber('SGO_VERCEL_UPLOAD_MAX_PAGES', 40), 500));
+const DEFAULT_BATCH_PAGES = Math.max(
+  1,
+  Math.min(Math.trunc(envNumber('SGO_BATCH_PAGES', 2)), 2),
+);
+const BUDGET_STOP_WINDOW_MS = 2500;
+const REQUEST_DEADLINE_RESERVE_MS = 1500;
+const UNBOUNDED_PAGES = Number.MAX_SAFE_INTEGER;
 
 function createScrapeDeadline(ms = SCRAPE_DEADLINE_MS) {
   const totalMs = Math.max(1000, Number(ms) || SCRAPE_DEADLINE_MS);
@@ -83,6 +92,26 @@ function createScrapeDeadline(ms = SCRAPE_DEADLINE_MS) {
       return Date.now() >= deadlineAt;
     },
   };
+}
+
+export const createSgoDeadline = createScrapeDeadline;
+
+function remainingBudgetMs(deadline) {
+  const remaining = Number(deadline?.remainingMs?.());
+  return Number.isFinite(remaining) ? remaining : Infinity;
+}
+
+function budgetExhausted(deadline, windowMs = BUDGET_STOP_WINDOW_MS) {
+  return remainingBudgetMs(deadline) <= windowMs;
+}
+
+function requestTimeoutForDeadline(deadline, fallbackMs) {
+  const remaining = remainingBudgetMs(deadline);
+  if (!Number.isFinite(remaining)) return fallbackMs;
+  return Math.max(
+    1000,
+    Math.min(Number(fallbackMs) || 1000, remaining - REQUEST_DEADLINE_RESERVE_MS),
+  );
 }
 
 function scrapeDeadlineError(deadline, context = 'sinkronisasi SGO') {
@@ -149,9 +178,6 @@ const REQUEST_TIMEOUT_MS = Math.max(
   Math.min(envNumber('SGO_REQUEST_TIMEOUT_MS', 20000), 60000),
 );
 
-// Enrichment NIK/paspor diambil dari halaman manifest per jamaah
-// (/ops/monitoring-jamaah/{id}/edit?embed=1). Request dibatasi agar server
-// SGO tidak dibanjiri saat scrape 400+ jamaah.
 const MANIFEST_TIMEOUT_MS = Math.max(
   5000,
   Math.min(envNumber('SGO_MANIFEST_TIMEOUT_MS', 20000), 60000),
@@ -160,20 +186,9 @@ const MANIFEST_CONCURRENCY = Math.max(
   1,
   Math.min(envNumber('SGO_MANIFEST_CONCURRENCY', 4), 20),
 );
-const MANIFEST_MAX_ENRICH = Math.max(
-  0,
-  Math.min(envNumber('SGO_MANIFEST_MAX', 3500), 10000),
-);
 const MANIFEST_CACHE_TTL_MS = Math.max(
   0,
   envNumber('SGO_MANIFEST_CACHE_MS', 5 * 60 * 1000),
-);
-// Pass kedua khusus manifest yang gagal di pass utama. Dijalankan dengan
-// concurrency lebih rendah dan backoff lebih panjang agar rate-limit SGO
-// di akhir scrape tidak menyisakan data NIK/paspor yang gagal.
-const MANIFEST_RETRY_MAX = Math.max(
-  0,
-  Math.min(envNumber('SGO_MANIFEST_RETRY_MAX', 300), 3500),
 );
 const MANIFEST_RETRY_CONCURRENCY = Math.max(
   1,
@@ -193,10 +208,6 @@ const PAGINATION_DELAY_MS = Math.max(
     Number.isFinite(rawPaginationDelay) ? rawPaginationDelay : 500,
     10000,
   ),
-);
-const PAGINATION_MAX_PAGES = Math.max(
-  1,
-  Math.min(envNumber('SGO_PAGINATION_MAX_PAGES', 250), 500),
 );
 const PAGINATION_PAGE_PARAM =
   String(process.env.SGO_PAGE_PARAM || 'page').trim() || 'page';
@@ -225,18 +236,11 @@ const SGO_MAX_CONSECUTIVE_PAGE_FAILURES = Math.max(
 );
 const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-// Upload Manifest adalah sumber data jamaah paling lengkap: SGO membatasi
-// Monitoring Jamaah ke 400 baris dan mengabaikan ?page, sedangkan Upload
-// Manifest benar-benar mendukung pagination (sekitar 3.000 jamaah/144 halaman).
 const MONITORING_JAMAAH_PATH = '/ops/monitoring-jamaah';
 const UPLOAD_DOCUMENTS_PATH = '/ops/upload-documents';
 const UPLOAD_DOCUMENTS_SEARCH = String(
   process.env.SGO_UPLOAD_SEARCH ?? 'ORD',
 ).trim();
-const UPLOAD_DOCUMENTS_MAX_PAGES = Math.max(
-  1,
-  Math.min(envNumber('SGO_UPLOAD_MAX_PAGES', 250), 500),
-);
 
 /** Token sesi SGO dari .env, tanpa prefix `sgo_admin_session=`. */
 export function getEnvSession() {
@@ -945,9 +949,20 @@ async function fetchManifestFields(manifestId, config, options = {}) {
     0,
     Math.min(Number(options.baseDelayMs) || 250, 15000),
   );
+  const deadline = options.deadline || null;
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
+      throw scrapeDeadlineError(deadline, `Pengambilan manifest ${id}`);
+    }
+    const configuredTimeout = Number(options.timeoutMs);
+    const timeoutMs = requestTimeoutForDeadline(
+      deadline,
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : MANIFEST_TIMEOUT_MS,
+    );
     try {
       let response;
       try {
@@ -958,7 +973,7 @@ async function fetchManifestFields(manifestId, config, options = {}) {
             Cookie: config.cookieHeader,
           },
           redirect: 'follow',
-          signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (networkError) {
         const cause =
@@ -1008,13 +1023,14 @@ async function fetchManifestFields(manifestId, config, options = {}) {
     } catch (error) {
       lastError = error;
       // Auth tidak pernah di-retry: cookie harus diperbarui manual.
-      if (error?.code === 'SGO_AUTH') break;
+      if (error?.code === 'SGO_AUTH' || error?.code === 'SGO_DEADLINE') break;
       if (attempt < attempts) {
         const retryAfter = Number(error?.retryAfter);
         const waitMs =
           Number.isFinite(retryAfter) && retryAfter > 0
             ? Math.min(retryAfter * 1000, 15000)
             : Math.min(baseDelayMs * 2 ** (attempt - 1), 15000);
+        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) break;
         if (waitMs > 0) await delay(waitMs);
       }
     }
@@ -1073,16 +1089,26 @@ function applyManifestFields(row, fields = {}) {
 export async function enrichJamaahWithManifest(rows = [], config, options = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const log = options.log !== false;
+  const updateProgress =
+    typeof options.updateProgress === 'function'
+      ? options.updateProgress
+      : options.updateProgress === false
+        ? () => {}
+        : updateSyncProgress;
   const deadline = options.deadline || null;
   const concurrency = Math.max(
     1,
     Math.min(Number(options.concurrency) || MANIFEST_CONCURRENCY, 20),
   );
-  const configuredMax = Number.isFinite(Number(options.max))
-    ? Number(options.max)
-    : MANIFEST_MAX_ENRICH;
-  const vercelCap = VERCEL_RUNTIME ? VERCEL_MANIFEST_MAX : 10000;
-  const maxRows = Math.max(0, Math.min(configuredMax, vercelCap, 10000));
+  const configuredMax = Number(options.max);
+  const maxRows = Number.isFinite(configuredMax)
+    ? Math.max(0, Math.trunc(configuredMax))
+    : list.length;
+  const progressOffset = Math.max(0, Math.trunc(Number(options.progressOffset) || 0));
+  const progressTotal = Math.max(
+    progressOffset + list.length,
+    Math.trunc(Number(options.progressTotal) || 0),
+  );
   const stats = {
     total: list.length,
     eligible: 0,
@@ -1124,7 +1150,7 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
   if (!selected.length) {
     if (log) {
       console.warn(
-        `[SGO] Manifest dilewati: SGO_MANIFEST_MAX=${maxRows} membatasi enrichment.`,
+        `[SGO] Manifest dilewati: tidak ada baris yang dipilih untuk enrichment.`,
       );
     }
     return { rows: list, stats };
@@ -1154,6 +1180,7 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     );
   }
 
+  let budgetStopped = false;
   const failures = [];
   await mapWithConcurrency(selected, concurrency, async (row) => {
     if (authError) {
@@ -1161,15 +1188,19 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
       done += 1;
       return;
     }
-    if (deadline?.isExpired?.()) {
+    if (budgetStopped || budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
       stats.skipped += 1;
       stats.deadlineReached = true;
+      budgetStopped = true;
       done += 1;
       return;
     }
 
     try {
-      const result = await fetchManifestFields(row.manifestId, config);
+      const result = await fetchManifestFields(row.manifestId, config, {
+        deadline,
+        timeoutMs: options.timeoutMs,
+      });
       row.manifestFetched = true;
       if (result.cached) stats.cacheHits += 1;
       else stats.fetched += 1;
@@ -1184,6 +1215,10 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
         message: error?.message || '',
       });
       if (error?.code === 'SGO_AUTH') authError = error;
+      if (error?.code === 'SGO_DEADLINE') {
+        budgetStopped = true;
+        stats.deadlineReached = true;
+      }
       if (stats.failed <= 5) {
         console.warn(
           `[SGO] Manifest ${row.manifestId} gagal (${error?.code || 'SGO_MANIFEST'}): ${error.message}`,
@@ -1192,16 +1227,17 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     } finally {
       done += 1;
       if (done % 10 === 0 || done === selected.length) {
-        updateSyncProgress({
+        const current = progressOffset + done;
+        updateProgress({
           phase: 'manifest',
-          percent: 82 + (done / Math.max(1, selected.length)) * 11,
-          message: `Memvalidasi NIK & paspor manifest ${done.toLocaleString('id-ID')}/${selected.length.toLocaleString('id-ID')}...`,
+          percent: 82 + (current / Math.max(1, progressTotal)) * 11,
+          message: `Memvalidasi NIK & paspor ${current.toLocaleString('id-ID')}/${progressTotal.toLocaleString('id-ID')}...`,
           detail: `${stats.fetched + stats.cacheHits} manifest OK • ${stats.failed} gagal`,
         });
       }
       if (log && (done % 50 === 0 || done === selected.length)) {
         console.log(
-          `[SGO] Progress manifest ${done}/${selected.length} | OK ${stats.fetched + stats.cacheHits} | gagal ${stats.failed}`,
+          `[SGO] Progress manifest ${progressOffset + done}/${progressTotal} | OK ${stats.fetched + stats.cacheHits} | gagal ${stats.failed}`,
         );
       }
     }
@@ -1210,14 +1246,8 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
   // Pass kedua: hanya manifest yang gagal, concurrency lebih rendah dan
   // backoff lebih panjang. Ini menangani rate-limit/timeout sesaat yang
   // biasanya muncul di akhir scrape saat ratusan request sudah berjalan.
-  if (!authError && !deadline?.isExpired?.() && failures.length && MANIFEST_RETRY_MAX > 0) {
-    const retryCandidates = failures.slice(0, MANIFEST_RETRY_MAX);
-    const unreached = failures.length - retryCandidates.length;
-    if (unreached > 0) {
-      console.warn(
-        `[SGO] Retry manifest dibatasi ${MANIFEST_RETRY_MAX}; ${unreached} gagal tidak dicoba ulang.`,
-      );
-    }
+  if (!authError && !budgetStopped && !budgetExhausted(deadline) && failures.length) {
+    const retryCandidates = [...failures];
     stats.retried = retryCandidates.length;
     const retryConcurrency = Math.min(MANIFEST_RETRY_CONCURRENCY, concurrency);
     const retryBaseDelay = Math.max(1000, SGO_HTTP_RETRY_BASE_MS);
@@ -1229,7 +1259,7 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
           `(concurrency ${retryConcurrency}, backoff ${retryBaseDelay}ms)...`,
       );
     }
-    updateSyncProgress({
+    updateProgress({
       phase: 'manifest',
       percent: 93.5,
       message: `Mencoba ulang ${retryCandidates.length.toLocaleString('id-ID')} manifest yang gagal...`,
@@ -1244,8 +1274,9 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
           retryDone += 1;
           return;
         }
-        if (deadline?.isExpired?.()) {
+        if (budgetStopped || budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
           stats.deadlineReached = true;
+          budgetStopped = true;
           retryDone += 1;
           return;
         }
@@ -1253,6 +1284,8 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
           const result = await fetchManifestFields(failure.manifestId, config, {
             attempts: Math.max(3, Math.min(SGO_HTTP_RETRY_ATTEMPTS, 6)),
             baseDelayMs: retryBaseDelay,
+            deadline,
+            timeoutMs: options.timeoutMs,
           });
           failure.row.manifestFetched = true;
           if (result.cached) stats.cacheHits += 1;
@@ -1264,6 +1297,10 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
           failure.status = Number(error?.status) || null;
           failure.message = error?.message || '';
           if (error?.code === 'SGO_AUTH') authError = error;
+          if (error?.code === 'SGO_DEADLINE') {
+            budgetStopped = true;
+            stats.deadlineReached = true;
+          }
           if (log && retryFailedLogged < 20) {
             retryFailedLogged += 1;
             console.warn(
@@ -1288,7 +1325,7 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     );
 
     stats.failed = Math.max(0, failures.length - stats.recovered);
-    updateSyncProgress({
+    updateProgress({
       phase: 'manifest',
       percent: 95,
       message: 'Retry manifest selesai...',
@@ -1316,7 +1353,7 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     if (nik && passport) stats.withBoth += 1;
   }
   stats.ms = Date.now() - started;
-  if (deadline?.isExpired?.()) stats.deadlineReached = true;
+  if (budgetStopped || budgetExhausted(deadline)) stats.deadlineReached = true;
 
   if (authError) {
     console.error(`[SGO] Enrichment manifest dihentikan: ${authError.message}`);
@@ -1578,11 +1615,15 @@ function retryWaitMs(attempt, error) {
  * Error auth tidak di-retry karena cookie harus diperbarui manual.
  */
 async function fetchSgoHtml(targetUrl, config, options = {}) {
-  const { modulePath = '', page = 1, persistRawPage = false } = options;
+  const { modulePath = '', page = 1, persistRawPage = false, deadline = null } = options;
   let lastError = null;
 
   for (let attempt = 1; attempt <= SGO_HTTP_RETRY_ATTEMPTS; attempt += 1) {
+    if (budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
+      throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
+    }
     const started = Date.now();
+    const timeoutMs = requestTimeoutForDeadline(deadline, REQUEST_TIMEOUT_MS);
     let response;
 
     try {
@@ -1593,13 +1634,13 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
           Cookie: config.cookieHeader,
         },
         redirect: 'follow',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       const cause = error?.cause?.code || error?.cause?.message || '';
       const isTimeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
       const reason = isTimeout
-        ? `Timeout ${REQUEST_TIMEOUT_MS}ms`
+        ? `Timeout ${timeoutMs}ms`
         : `${error.message || 'fetch failed'}${cause ? ` (${cause})` : ''}`;
       const wrapped = buildError(
         `Request ${modulePath || targetUrl} gagal: ${reason}`,
@@ -1610,6 +1651,9 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
       if (attempt < SGO_HTTP_RETRY_ATTEMPTS && isRetryableSgoError(wrapped)) {
         const waitMs = retryWaitMs(attempt, wrapped);
+        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) {
+          throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
+        }
         console.warn(
           `[SGO Retry] ${modulePath || targetUrl} hal. ${page} gagal ` +
             `(${wrapped.code}) attempt ${attempt}/${SGO_HTTP_RETRY_ATTEMPTS}. ` +
@@ -1644,6 +1688,9 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
       if (attempt < SGO_HTTP_RETRY_ATTEMPTS && isRetryableSgoError(wrapped)) {
         const waitMs = retryWaitMs(attempt, wrapped);
+        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) {
+          throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
+        }
         console.warn(
           `[SGO Retry] ${modulePath || targetUrl} hal. ${page} gagal membaca body ` +
             `attempt ${attempt}/${SGO_HTTP_RETRY_ATTEMPTS}. Coba lagi dalam ${waitMs}ms...`,
@@ -1704,6 +1751,9 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
       if (attempt < SGO_HTTP_RETRY_ATTEMPTS && isRetryableSgoError(httpError)) {
         const waitMs = retryWaitMs(attempt, httpError);
+        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) {
+          throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
+        }
         console.warn(
           `[SGO Retry] ${modulePath || targetUrl} hal. ${page} HTTP ${response.status} ` +
             `attempt ${attempt}/${SGO_HTTP_RETRY_ATTEMPTS}. Coba lagi dalam ${waitMs}ms...`,
@@ -1751,13 +1801,13 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
  */
 export async function fetchSgoModule(modulePath, config, options = {}) {
   const normalizedPath = normalizeModulePath(modulePath);
-  const { page = 1, persistRaw = true } = options;
+  const { page = 1, persistRaw = true, deadline = null } = options;
   const persistRawPage = Boolean(persistRaw && Number(page) <= 1);
   const targetUrl = buildSgoPageUrl(config.baseUrl, normalizedPath, page);
   const { response, html, finalUrl, contentType, ms } = await fetchSgoHtml(
     targetUrl,
     config,
-    { modulePath: normalizedPath, page, persistRawPage },
+    { modulePath: normalizedPath, page, persistRawPage, deadline },
   );
 
   const rows = extractFromHtml(html).filter(isCleanJamaahRow);
@@ -1805,27 +1855,33 @@ export async function fetchSgoModule(modulePath, config, options = {}) {
  *
  * Halaman 1 memakai URL asli (tanpa `page`) agar perilaku dan raw response
  * tetap sama. Halaman 2+ diminta berurutan dengan jeda `SGO_PAGINATION_DELAY_MS`.
- * Loop berhenti saat halaman kosong, HTML/baris berulang, error, atau batas
- * `SGO_PAGINATION_MAX_PAGES` tercapai. Semua baris digabung dan di-dedupe.
+ * Loop berhenti saat halaman kosong, HTML/baris berulang, atau error. Semua
+ * baris digabung dan di-dedupe.
  */
 export async function fetchSgoModulePaginated(modulePath, config, options = {}) {
   const normalizedPath = normalizeModulePath(modulePath);
   const { persistRaw = true, deadline = null } = options;
   const startPage = Math.max(1, Math.trunc(Number(options.startPage) || 1));
-  const batchMax = Math.max(1, Math.min(Math.trunc(Number(options.maxPages) || PAGINATION_MAX_PAGES), 500));
+  const requestedMax = Number(options.maxPages);
+  const batchMax =
+    Number.isFinite(requestedMax) && requestedMax > 0
+      ? Math.trunc(requestedMax)
+      : UNBOUNDED_PAGES;
   const started = Date.now();
   console.log(`[SGO] Scraping page ${startPage}... (${normalizedPath})`);
   const firstPage = await fetchSgoModule(normalizedPath, config, {
     page: startPage,
     persistRaw: persistRaw && startPage === 1,
+    deadline,
   });
+  firstPage.pageInfo = extractUploadPageInfo(firstPage.html || '');
 
   const moduleLabel = getSgoModuleMeta(normalizedPath)?.label || normalizedPath;
   updateSyncProgress({
     phase: 'pages',
     percent: syncPercentFromPages(1, 0, { start: 5, end: 30 }),
-    message: `Mengambil ${moduleLabel} halaman 1...`,
-    detail: `${firstPage.rows.length.toLocaleString('id-ID')} baris pada halaman pertama`,
+    message: `Mengambil ${moduleLabel} halaman ${startPage}...`,
+    detail: `${firstPage.rows.length.toLocaleString('id-ID')} baris pada halaman ${startPage}`,
     pagesFetched: 1,
     rows: firstPage.rows.length,
   });
@@ -1840,6 +1896,8 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     pagesWithRows: firstPage.rows.length ? 1 : 0,
     rowsOnFirstPage: firstPage.rows.length,
     rows: 0,
+    totalJamaahReported: 0,
+    totalPagesReported: 0,
     stopReason: 'single-page',
     hasMore: false,
     nextPage: null,
@@ -1865,6 +1923,8 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
   };
 
   addPageRows(firstPage.rows);
+  pagination.totalJamaahReported = Number(firstPage.pageInfo?.totalJamaah) || 0;
+  pagination.totalPagesReported = Number(firstPage.pageInfo?.totalPages) || 0;
 
   const finish = (stopReason) => {
     pagination.stopReason = stopReason;
@@ -1878,7 +1938,16 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
   }
 
   if (batchMax <= 1) {
-    return { ...firstPage, rows: combinedRows, pagination: { ...finish('max-pages'), hasMore: true, nextPage: startPage + 1 } };
+    const hasRows = Boolean(firstPage.pageOk && firstPage.rows.length);
+    return {
+      ...firstPage,
+      rows: combinedRows,
+      pagination: {
+        ...finish(hasRows ? 'max-pages' : 'empty-page'),
+        hasMore: hasRows,
+        nextPage: hasRows ? startPage + 1 : null,
+      },
+    };
   }
 
   if (!firstPage.rows.length) {
@@ -1895,7 +1964,14 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
   const lastPageLimit = startPage + batchMax - 1;
 
   while (page <= lastPageLimit) {
-    if (deadline?.isExpired?.()) {
+    if (budgetExhausted(deadline)) {
+      stopReason = 'deadline';
+      break;
+    }
+    if (
+      PAGINATION_DELAY_MS > 0 &&
+      remainingBudgetMs(deadline) <= PAGINATION_DELAY_MS + BUDGET_STOP_WINDOW_MS
+    ) {
       stopReason = 'deadline';
       break;
     }
@@ -1907,6 +1983,7 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
       currentPage = await fetchSgoModule(normalizedPath, config, {
         page,
         persistRaw: false,
+        deadline,
       });
     } catch (error) {
       stopReason = error?.code === 'SGO_AUTH' ? 'auth-error' : 'fetch-error';
@@ -1925,6 +2002,11 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
 
     pagination.pagesFetched += 1;
     lastPage = currentPage;
+    currentPage.pageInfo = extractUploadPageInfo(currentPage.html || '');
+    pagination.totalJamaahReported =
+      currentPage.pageInfo.totalJamaah || pagination.totalJamaahReported;
+    pagination.totalPagesReported =
+      currentPage.pageInfo.totalPages || pagination.totalPagesReported;
 
     if (!currentPage.pageOk) {
       stopReason = 'page-not-ok';
@@ -1932,6 +2014,11 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     }
 
     // Server yang mengabaikan parameter `page` akan mengembalikan HTML identik.
+    const reportedPage = Number(currentPage.pageInfo?.currentPage) || 0;
+    if (reportedPage > 0 && reportedPage !== page) {
+      stopReason = 'pagination-ignored';
+      break;
+    }
     if (seenHashes.has(currentPage.htmlHash)) {
       stopReason = 'duplicate-page';
       break;
@@ -1951,7 +2038,7 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
         start: 5,
         end: 30,
       }),
-      message: `Mengambil ${moduleLabel} halaman ${pagination.pagesFetched}...`,
+      message: `Mengambil ${moduleLabel} halaman ${page}...`,
       detail: `${combinedRows.length.toLocaleString('id-ID')} jamaah terkumpul`,
       pagesFetched: pagination.pagesFetched,
       rows: combinedRows.length,
@@ -1968,13 +2055,18 @@ export async function fetchSgoModulePaginated(modulePath, config, options = {}) 
     page += 1;
   }
 
-  if (deadline?.isExpired?.() && stopReason !== 'auth-error') {
+  if (budgetExhausted(deadline, 0) && stopReason !== 'auth-error') {
     stopReason = 'deadline';
   }
   const stats = finish(stopReason);
-  const nextByProbe = ['max-pages', 'deadline'].includes(stats.stopReason) ? page : null;
-  stats.nextPage = nextByProbe;
-  stats.hasMore = Boolean(nextByProbe);
+  const nextByKnownTotal =
+    stats.totalPagesReported > 0 && page < stats.totalPagesReported ? page : null;
+  const nextByProbe =
+    stats.totalPagesReported <= 0 && ['max-pages', 'deadline'].includes(stats.stopReason)
+      ? page
+      : null;
+  stats.nextPage = nextByKnownTotal || nextByProbe;
+  stats.hasMore = Boolean(stats.nextPage);
   console.log(
     `[SGO Pagination] ${normalizedPath}: ${stats.pagesFetched} halaman diminta, ` +
       `${stats.pagesWithRows} berisi data, ${stats.rows} jamaah unik ` +
@@ -2009,6 +2101,7 @@ export async function fetchUploadDocumentsPage(config, page = 1, options = {}) {
       modulePath: UPLOAD_DOCUMENTS_PATH,
       page: pageNumber,
       persistRawPage,
+      deadline: options.deadline || null,
     },
   );
 
@@ -2065,12 +2158,12 @@ export async function fetchUploadDocumentsPage(config, page = 1, options = {}) {
 export async function fetchUploadDocumentsPaginated(config, options = {}) {
   const started = Date.now();
   const deadline = options.deadline || null;
-  const runtimeMax = VERCEL_RUNTIME
-    ? Math.min(UPLOAD_DOCUMENTS_MAX_PAGES, VERCEL_UPLOAD_MAX_PAGES)
-    : UPLOAD_DOCUMENTS_MAX_PAGES;
   const startPage = Math.max(1, Math.trunc(Number(options.startPage) || 1));
-  const requestedMax = Number(options.maxPages) || runtimeMax;
-  const maxPages = Math.max(1, Math.min(requestedMax, 500));
+  const requestedMax = Number(options.maxPages);
+  const maxPages =
+    Number.isFinite(requestedMax) && requestedMax > 0
+      ? Math.trunc(requestedMax)
+      : UNBOUNDED_PAGES;
   const effectiveMaxPages = PAGINATION_ENABLED ? maxPages : 1;
   const search = String(options.search || '').trim() || UPLOAD_DOCUMENTS_SEARCH;
   const stats = {
@@ -2143,6 +2236,30 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     }
   };
 
+  const waitWithinBudget = async (ms) => {
+    const waitMs = Math.max(0, Number(ms) || 0);
+    if (!waitMs) return true;
+    if (remainingBudgetMs(deadline) <= waitMs + BUDGET_STOP_WINDOW_MS) return false;
+    await delay(waitMs);
+    return true;
+  };
+
+  const markDeadline = () => {
+    stats.deadlineReached = true;
+    stopReason = combined.length ? 'deadline' : 'deadline-empty';
+    updateSyncProgress({
+      phase: 'deadline',
+      percent: combined.length ? 79 : 100,
+      message: combined.length
+        ? 'Batas waktu sinkronisasi tercapai, menyimpan data yang sudah terkumpul...'
+        : 'Batas waktu sinkronisasi tercapai sebelum data berhasil dikumpulkan.',
+      detail: `${combined.length.toLocaleString('id-ID')} jamaah terkumpul sebelum batas waktu`,
+      pagesFetched: stats.pagesFetched,
+      totalPages: stats.totalPagesReported,
+      rows: combined.length,
+    });
+  };
+
   // Kirim baris per halaman ke pemanggil (server) agar cache SQLite bisa
   // diperbarui saat sinkronisasi masih berjalan. Kegagalan callback tidak
   // boleh menghentikan pagination utama.
@@ -2174,24 +2291,13 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
 
   const lastPageLimit = startPage + effectiveMaxPages - 1;
   while (page <= lastPageLimit) {
-    if (deadline?.isExpired?.()) {
-      stats.deadlineReached = true;
-      stopReason = combined.length ? 'deadline' : 'deadline-empty';
-      updateSyncProgress({
-        phase: 'deadline',
-        percent: combined.length ? 79 : 100,
-        message: combined.length
-          ? 'Batas waktu sinkronisasi tercapai, menyimpan data yang sudah terkumpul...'
-          : 'Batas waktu sinkronisasi tercapai sebelum data berhasil dikumpulkan.',
-        detail: `${combined.length.toLocaleString('id-ID')} jamaah terkumpul sebelum batas waktu`,
-        pagesFetched: stats.pagesFetched,
-        totalPages: stats.totalPagesReported,
-        rows: combined.length,
-      });
+    if (budgetExhausted(deadline)) {
+      markDeadline();
       break;
     }
-    if (page > startPage && PAGINATION_DELAY_MS > 0) {
-      await delay(PAGINATION_DELAY_MS);
+    if (page > startPage && !(await waitWithinBudget(PAGINATION_DELAY_MS))) {
+      markDeadline();
+      break;
     }
     const searchLabel = search ? `?search=${search}` : '';
     console.log(
@@ -2203,6 +2309,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
       current = await fetchUploadDocumentsPage(config, page, {
         persistRaw: options.persistRaw !== false,
         search,
+        deadline,
       });
     } catch (error) {
       recordFailure(page, error, 'pagination');
@@ -2214,6 +2321,11 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
 
       if (error?.code === 'SGO_AUTH') {
         stopReason = 'auth-error';
+        break;
+      }
+      if (error?.code === 'SGO_DEADLINE' || budgetExhausted(deadline)) {
+        noteFailedPage(page);
+        markDeadline();
         break;
       }
 
@@ -2234,8 +2346,10 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
         break;
       }
 
-      if (SGO_PAGE_FAILURE_COOLDOWN_MS > 0) {
-        await delay(SGO_PAGE_FAILURE_COOLDOWN_MS);
+      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
+        noteFailedPage(page);
+        markDeadline();
+        break;
       }
       page += 1;
       continue;
@@ -2269,11 +2383,17 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
         stopReason = 'last-page';
         break;
       }
-      if (SGO_PAGE_FAILURE_COOLDOWN_MS > 0) {
-        await delay(SGO_PAGE_FAILURE_COOLDOWN_MS);
+      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
+        markDeadline();
+        break;
       }
       page += 1;
       continue;
+    }
+
+    if (page > startPage && current.pageInfo.currentPage === startPage && startPage === 1) {
+      stopReason = 'pagination-ignored';
+      break;
     }
 
     // Server yang mengabaikan parameter `page` akan mengembalikan HTML identik.
@@ -2297,8 +2417,9 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
         stopReason = 'last-page';
         break;
       }
-      if (SGO_PAGE_FAILURE_COOLDOWN_MS > 0) {
-        await delay(SGO_PAGE_FAILURE_COOLDOWN_MS);
+      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
+        markDeadline();
+        break;
       }
       page += 1;
       continue;
@@ -2326,8 +2447,9 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
           stopReason = 'empty-page';
           break;
         }
-        if (SGO_PAGE_FAILURE_COOLDOWN_MS > 0) {
-          await delay(SGO_PAGE_FAILURE_COOLDOWN_MS);
+        if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
+          markDeadline();
+          break;
         }
         page += 1;
         continue;
@@ -2338,14 +2460,14 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
     }
 
     stats.pagesWithRows += 1;
-    if (page === 1) stats.rowsOnFirstPage = current.rows.length;
+    if (page === startPage) stats.rowsOnFirstPage = current.rows.length;
 
     const added = ingestPage(current);
     notifyPageRows(current, added);
     updateSyncProgress({
       phase: 'upload-pages',
       percent: syncPercentFromPages(
-        stats.pagesFetched,
+        page,
         stats.totalPagesReported,
         { start: 6, end: 80 },
       ),
@@ -2386,14 +2508,19 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
 
   // Recovery pass: halaman yang gagal di loop utama dicoba ulang setelah jeda.
   // Baris yang berhasil dipulihkan digabung tanpa duplikasi.
-  if (stopReason !== 'auth-error' && !deadline?.isExpired?.() && stats.failedPages.length) {
+  if (
+    stopReason !== 'auth-error' &&
+    !budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS) &&
+    stats.failedPages.length
+  ) {
     for (const failedPage of [...stats.failedPages]) {
-      if (deadline?.isExpired?.()) {
+      if (budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
         stats.deadlineReached = true;
         break;
       }
-      if (SGO_PAGE_FAILURE_COOLDOWN_MS > 0) {
-        await delay(SGO_PAGE_FAILURE_COOLDOWN_MS);
+      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
+        stats.deadlineReached = true;
+        break;
       }
       console.log(`[SGO Upload] Recovery halaman ${failedPage}...`);
 
@@ -2401,6 +2528,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
         const recovered = await fetchUploadDocumentsPage(config, failedPage, {
           persistRaw: false,
           search,
+          deadline,
         });
 
         if (!recovered.pageOk) {
@@ -2426,7 +2554,7 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
 
         const added = ingestPage(recovered);
         notifyPageRows(recovered, added);
-        if (recovered.page === 1 && !firstPage) firstPage = recovered;
+        if (!firstPage) firstPage = recovered;
         if (!lastPage || recovered.page >= lastPage.page) lastPage = recovered;
 
         console.log(
@@ -2446,6 +2574,10 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
           stopReason = 'auth-error';
           break;
         }
+        if (error?.code === 'SGO_DEADLINE' || budgetExhausted(deadline)) {
+          stats.deadlineReached = true;
+          break;
+        }
       }
     }
   }
@@ -2459,13 +2591,13 @@ export async function fetchUploadDocumentsPaginated(config, options = {}) {
   ) {
     stopReason = 'recovered';
   }
-  if (deadline?.isExpired?.() && stopReason !== 'auth-error') {
+  if (budgetExhausted(deadline, 0) && stopReason !== 'auth-error') {
     stats.deadlineReached = true;
     stopReason = combined.length ? 'deadline' : 'deadline-empty';
   }
 
   const nextByKnownTotal =
-    stats.totalPagesReported > 0 && page <= stats.totalPagesReported ? page : null;
+    stats.totalPagesReported > 0 && page < stats.totalPagesReported ? page : null;
   const nextByProbe =
     stats.totalPagesReported <= 0 && ['max-pages', 'deadline', 'completed-with-gaps'].includes(stopReason)
       ? page
@@ -2620,7 +2752,7 @@ async function runSgoAttempt({ config, modulePaths, onUploadPage, deadline, star
       }
       return isJamaahModule(normalizedPath)
         ? fetchSgoModulePaginated(normalizedPath, config, { deadline, startPage, maxPages: batchPages })
-        : fetchSgoModule(normalizedPath, config);
+        : fetchSgoModule(normalizedPath, config, { deadline });
     }),
   );
 
@@ -2703,11 +2835,11 @@ export async function scrapeSgoModules({
   url,
   cookie,
   focusModule,
-  enrichManifest = true,
+  enrichManifest = false,
   onUploadPage,
   deadline,
   startPage = 1,
-  batchPages = 20,
+  batchPages = DEFAULT_BATCH_PAGES,
 } = {}) {
   const requestConfig = resolveSgoConfig({ url, cookie });
   if (!requestConfig.ok) {
@@ -2728,7 +2860,7 @@ export async function scrapeSgoModules({
     }
   }
 
-  const scrapeDeadline = deadline || createScrapeDeadline();
+  const scrapeDeadline = deadline || createScrapeDeadline(SCRAPE_BUDGET_MS);
   console.log(
     `[SGO] Scrape ${focus ? `modul ${modulePaths.join(', ')}` : `${modulePaths.length} modul`} | cookie dari ${requestConfig.cookieSource} (${maskCookie(requestConfig.cookieHeader)}) | base ${requestConfig.baseUrl} | deadline ${Math.round(scrapeDeadline.totalMs / 1000)}s`,
   );
@@ -2739,9 +2871,7 @@ export async function scrapeSgoModules({
     message: focus
       ? `Mengambil data ${getSgoModuleMeta(focus)?.label || focus} dari SGO...`
       : `Mengambil ${modulePaths.length} modul SGO...`,
-    detail: VERCEL_RUNTIME
-      ? `Koneksi SGO Admin terhubung (batas serverless ${Math.round(scrapeDeadline.totalMs / 1000)} detik)`
-      : 'Koneksi SGO Admin terhubung',
+    detail: `Koneksi SGO Admin terhubung (budget ${Math.round(scrapeDeadline.totalMs / 1000)} detik, batch ${batchPages} halaman)`,
     modules: modulePaths,
   });
 
@@ -2768,10 +2898,12 @@ export async function scrapeSgoModules({
   // Enrichment dijalankan sekali pada hasil final, supaya tidak ada request
   // manifest ganda. Refresh Upload Manifest boleh melewati tahap ini karena
   // hanya membutuhkan status dokumen/RTB.
-  if (enrichManifest && attempt.rows.length > 0) {
-    assertNotPastDeadline(scrapeDeadline, 'Sinkronisasi SGO');
+  if (
+    enrichManifest &&
+    attempt.rows.length > 0 &&
+    !budgetExhausted(scrapeDeadline, REQUEST_DEADLINE_RESERVE_MS)
+  ) {
     const enriched = await enrichJamaahWithManifest(attempt.rows, config, {
-      max: VERCEL_RUNTIME ? VERCEL_MANIFEST_MAX : MANIFEST_MAX_ENRICH,
       deadline: scrapeDeadline,
     });
     attempt = {

@@ -1502,18 +1502,23 @@
       els.refresh.addEventListener('click', async () => {
         const previousStates = captureVisibleDocStates();
         state.liveLastAt = 0;
-        const result = await window.SgoSync.run({
+        const result = await window.SgoSync.runFullSync({
           panel: els.progress,
           button: els.refresh,
           endpoint: '/api/jamaah/scrape-cookie',
+          validationEndpoint: '/api/jamaah/validate-manifest',
           body: {
             focusModule: '/ops/upload-documents',
             skipManifest: true,
             js: true,
           },
+          validationBody: { js: true },
+          batchPages: 2,
           label: 'Upload Manifest',
           busyLabel: 'Sinkronkan...',
+          retryAttempts: 3,
           onProgress: queueLiveRefresh,
+          onValidationProgress: queueLiveRefresh,
         });
 
         if (!result.ok) {
@@ -1536,16 +1541,20 @@
         state.monthOptionsSignature = '';
         await loadPage(1);
         flashChangedDocStates(previousStates);
+        const count = Number(
+          result.data?.aggregatedCount || result.data?.count || result.rows?.length || 0,
+        );
         toast(
           'Success',
-          result.data?.message || 'Sinkronisasi Upload Manifest selesai.',
+          result.data?.message ||
+            `Sinkronisasi Upload Manifest selesai: ${count.toLocaleString('id-ID')} jamaah.`,
           'success',
         );
         document.dispatchEvent(
           new CustomEvent('umrah:data-updated', {
             detail: {
               source: 'manifest-sync',
-              count: Number(result.data?.count || 0),
+              count,
               module: '/ops/upload-documents',
             },
           }),

@@ -156,17 +156,21 @@
   async function refresh() {
     if (loading) return null;
 
-    const result = await window.SgoSync.run({
+    const result = await window.SgoSync.runFullSync({
       panel: els.progress,
       button: els.refresh,
       endpoint: '/api/jamaah/scrape-cookie',
+      validationEndpoint: '/api/jamaah/validate-manifest',
       body: {
         focusModule: '/ops/monitoring-jamaah',
         skipManifest: true,
         js: true,
       },
+      validationBody: { js: true },
+      batchPages: 2,
       label: 'Monitoring Jamaah',
       busyLabel: 'Menyinkronkan...',
+      retryAttempts: 3,
     });
 
     if (!result.ok) {
@@ -179,16 +183,20 @@
 
     loaded = false;
     await load({ force: true });
+    const count = Number(
+      result.data?.aggregatedCount || result.data?.count || result.rows?.length || 0,
+    );
     toast(
       'Success',
-      result.data?.message || 'Sinkronisasi Monitoring Jamaah selesai.',
+      result.data?.message ||
+        `Sinkronisasi Monitoring Jamaah selesai: ${count.toLocaleString('id-ID')} jamaah.`,
       'success',
     );
     document.dispatchEvent(
       new CustomEvent('umrah:data-updated', {
         detail: {
           source: 'monitoring-sync',
-          count: Number(result.data?.count || 0),
+          count,
           module: '/ops/monitoring-jamaah',
         },
       }),

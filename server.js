@@ -23,11 +23,14 @@ import {
 import {
   SGO_MODULES,
   SGO_MODULE_OPTIONS,
+  createSgoDeadline,
+  enrichJamaahWithManifest,
   fetchSingleJamaahFromSgo,
   formatJamaahList,
   getEnvSession,
   getSgoModuleMeta,
   isJamaahModule,
+  resolveSgoConfig,
   resolveSgoModule,
   scrapeSgoModules,
   scrapeSgoWithBrowser,
@@ -115,6 +118,7 @@ app.use(sgoEditRouter);
 // Deep link modul console. Tab controller tetap menentukan tampilan aktif di
 // sisi klien, tetapi refresh langsung pada URL modul tidak lagi 404.
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const UPLOAD_DOCUMENTS_PATH = '/ops/upload-documents';
 for (const routePath of [
   '/ops/monitoring-jamaah',
   '/ops/upload-documents',
@@ -303,6 +307,43 @@ function paginationPageCount(result = {}) {
   );
 }
 
+function primaryPaginationEntry(result = {}) {
+  const entries = Array.isArray(result.pagination) ? result.pagination : [];
+  return (
+    entries.find((entry) => entry?.modulePath === UPLOAD_DOCUMENTS_PATH) ||
+    entries.find((entry) => entry?.mode === 'upload-documents') ||
+    entries[0] ||
+    null
+  );
+}
+
+function buildBatchMeta(result = {}, { startPage = 1, batchPages = 1, startedAt = 0 } = {}) {
+  const primary = primaryPaginationEntry(result);
+  const totalPages = Number(primary?.totalPagesReported) || 0;
+  const nextCandidate = Number(primary?.nextPage) || null;
+  const hasMore = Boolean(primary?.hasMore && nextCandidate);
+  const processedPages = Number(primary?.pagesFetched) || 0;
+  return {
+    batch: {
+      modulePath: primary?.modulePath || '',
+      startPage,
+      batchPages,
+      processedPages,
+      pagesFetched: processedPages,
+      nextPage: hasMore ? nextCandidate : null,
+      hasMore,
+      totalPages,
+      totalJamaah: Number(primary?.totalJamaahReported) || 0,
+      deadlineReached: Boolean(primary?.deadlineReached),
+      budgetMs: Number(primary?.deadlineMs) || 0,
+      elapsedMs: startedAt ? Date.now() - startedAt : 0,
+    },
+    nextPage: hasMore ? nextCandidate : null,
+    hasMore,
+    totalPages,
+  };
+}
+
 function countUniqueRows(rows = [], pick) {
   const set = new Set();
   for (const row of rows) {
@@ -423,8 +464,14 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
   const cookie = String(req.body?.cookie || req.body?.cookies || '').trim();
   const requestedFocus = String(req.body?.focusModule || '').trim();
   const enrichManifest = req.body?.skipManifest !== true;
-  const startPage = Math.max(1, Math.trunc(Number(req.body?.startPage) || 1));
-  const batchPages = Math.max(1, Math.min(Math.trunc(Number(req.body?.batchPages) || 20), 40));
+  const startPage = Math.max(1, Math.trunc(Number(req.body?.startPage || req.body?.page) || 1));
+  const requestedBatch = Number(req.body?.batchPages || req.body?.batchSize);
+  const configuredBatch = Number(process.env.SGO_BATCH_PAGES) || 2;
+  const batchPages = Math.max(
+    1,
+    Math.min(Math.trunc(requestedBatch || configuredBatch || 2), 2),
+  );
+  const batchMode = true;
 
   let focusModule;
   try {
@@ -503,6 +550,21 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         detail: message,
         focusModule,
       }),
+      records: [],
+      page: startPage,
+      batch: {
+        startPage,
+        batchPages,
+        processedPages: 0,
+        pagesFetched: 0,
+        nextPage: null,
+        hasMore: false,
+        totalPages: 0,
+        elapsedMs: Date.now() - startedAt,
+      },
+      nextPage: null,
+      hasMore: false,
+      totalPages: 0,
       code: error.code || 'SGO_ERROR',
       supportedModules: supportedModulesPayload(),
     });
@@ -514,13 +576,18 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
     const stored = setJamaahData(fast.rows, {
       type: fast.focus ? 'focused' : 'unified',
       // Modul non-jamaah tidak boleh menimpa data Monitoring Jamaah.
-      merge: Boolean(focusModule && !isJamaahModule(focusModule)),
+      merge:
+        startPage > 1 ||
+        Boolean(focusModule && !isJamaahModule(focusModule)),
       url: fast.config.baseUrl,
       modules: fast.modulesVisited,
     });
-    const jamaahList = formatJamaahList(stored);
+    const batchJamaahList = formatJamaahList(fast.rows);
+    const storedCount = stored.length;
+    const batchCount = batchJamaahList.length;
+    const batchMeta = buildBatchMeta(fast, { startPage, batchPages, startedAt });
     const fieldCoverage = getJamaahSource()?.fieldCoverage || {};
-    const pagesFetched = paginationPageCount(fast) || 1;
+    const pagesFetched = batchMeta.batch.processedPages || paginationPageCount(fast) || 1;
     const moduleLabel = fast.focus
       ? getSgoModuleMeta(fast.focus)?.label || fast.focus
       : '';
@@ -528,8 +595,8 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       phase: 'saving',
       percent: 95,
       message: 'Menyimpan data jamaah & cache SQLite...',
-      detail: `${jamaahList.length.toLocaleString('id-ID')} jamaah`,
-      rows: jamaahList.length,
+      detail: `${storedCount.toLocaleString('id-ID')} jamaah tersimpan`,
+      rows: storedCount,
     });
     const cache = ensureManifestCache({ force: true });
     const summary = buildSyncSummary({
@@ -546,36 +613,33 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         : {},
     });
     console.log(
-      `[SGO] Data jamaah berhasil dimuat: ${jamaahList.length} jamaah | ` +
+      `[SGO] Data jamaah berhasil dimuat: ${batchCount} jamaah batch | ` +
+        `${storedCount} total tersimpan | ` +
         `NIK ${fieldCoverage.nik || 0} | Paspor ${fieldCoverage.passport || 0} | ` +
         `Manifest ${fieldCoverage.manifestId || 0} | ` +
         `modul ${fast.modulesVisited.length}/${fast.modulePaths.length} | ` +
         `${pagesFetched} halaman.`,
     );
-    console.log(`[SGO] Total jamaah tersimpan: ${jamaahList.length}`);
+    console.log(`[SGO] Total jamaah tersimpan: ${storedCount}`);
     logSyncSummary(summary);
     finishSyncProgress({
       message:
-        `Sinkronisasi selesai: ${jamaahList.length.toLocaleString('id-ID')} jamaah, ` +
-        `${summary.documentsUpdated.toLocaleString('id-ID')} status dokumen diperbarui.`,
+        `Batch halaman ${startPage} selesai: ${batchCount.toLocaleString('id-ID')} jamaah, ` +
+        `${storedCount.toLocaleString('id-ID')} total tersimpan.`,
       detail:
         `${Number(summary.manifestOk || 0).toLocaleString('id-ID')} manifest OK • ` +
         `${Number(summary.manifestFailed || 0).toLocaleString('id-ID')} gagal`,
       summary,
-      rows: jamaahList.length,
+      rows: storedCount,
       documentsUpdated: summary.documentsUpdated,
       pagesFetched: summary.pagesFetched,
-      totalPages: summary.totalPages,
+      totalPages: batchMeta.totalPages || summary.totalPages,
     });
 
-    const paginationEntries = Array.isArray(fast.pagination) ? fast.pagination : [];
-    const primaryPagination =
-      paginationEntries.find((entry) => entry?.modulePath === UPLOAD_DOCUMENTS_PATH) ||
-      paginationEntries.find((entry) => entry?.mode === 'upload-documents') ||
-      paginationEntries[0] ||
-      null;
-    const hasMore = Boolean(primaryPagination?.hasMore);
-    const nextPage = Number(primaryPagination?.nextPage) || null;
+    const batchLabel =
+      batchMeta.batch.processedPages > 0
+        ? `halaman ${startPage}-${startPage + batchMeta.batch.processedPages - 1}`
+        : `halaman ${startPage}`;
 
     return res.json({
       success: true,
@@ -588,21 +652,20 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
         ? 'Cookie dari UI tidak menghasilkan data; berhasil memakai cookie SGO_ADMIN_SESSION dari .env.'
         : null,
       message: fast.focus
-        ? `Berhasil memuat ${moduleLabel} batch halaman ${startPage} - ${jamaahList.length.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman SGO.`
-        : `Berhasil mengindeks ${fast.modulesVisited.length}/${SGO_MODULES.length} modul SGO Admin - ${jamaahList.length.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman.`,
-      count: jamaahList.length,
-      storedJamaahCount: jamaahList.length,
+        ? `Batch ${moduleLabel} ${batchLabel}: ${batchCount.toLocaleString('id-ID')} jamaah, ${storedCount.toLocaleString('id-ID')} total tersimpan.`
+        : `Berhasil mengindeks ${fast.modulesVisited.length}/${SGO_MODULES.length} modul SGO Admin - ${storedCount.toLocaleString('id-ID')} jamaah tersimpan dari ${pagesFetched} halaman.`,
+      count: storedCount,
+      batchCount,
+      storedJamaahCount: storedCount,
+      records: batchJamaahList,
+      page: startPage,
       batch: {
-        startPage,
-        batchPages,
-        pagesFetched,
-        nextPage,
-        hasMore,
-        totalPages: Number(primaryPagination?.totalPagesReported) || 0,
-        totalJamaah: Number(primaryPagination?.totalJamaahReported) || 0,
+        ...batchMeta.batch,
+        jamaahCount: batchCount,
       },
-      nextPage,
-      hasMore,
+      nextPage: batchMeta.nextPage,
+      hasMore: batchMeta.hasMore,
+      totalPages: batchMeta.totalPages,
       source: getJamaahSource(),
       fieldCoverage,
       manifest: fast.manifestEnrichment || null,
@@ -619,8 +682,9 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       modulesFailed: fast.modulesFailed,
       totalModules: fast.focus ? fast.modulePaths.length : SGO_MODULES.length,
       focusModule: fast.focus || null,
-      jamaahList,
-      sample: jamaahList.slice(0, 3),
+      jamaahList: batchJamaahList,
+      batchJamaahList,
+      sample: batchJamaahList.slice(0, 3),
       errors: fast.errors,
       ...rawResponseFields(fast.focus || ''),
     });
@@ -652,6 +716,7 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
     });
     return res.json({
       ...buildModuleLoadedPayload(fast, focusModule),
+      ...buildBatchMeta(fast, { startPage, batchPages, startedAt }),
       syncSummary: summary,
     });
   }
@@ -663,7 +728,7 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
 
   // Fallback Puppeteer hanya untuk satu modul fokus. Untuk unified 16 modul,
   // jalur fetch paralel sudah cukup dan Puppeteer bisa memakan waktu lama.
-  if (!fast.authError && fast.focus) {
+  if (!fast.authError && fast.focus && !batchMode) {
     try {
       console.log('[SGO] Menjalankan fallback Puppeteer untuk mengambil ulang data real...');
       updateSyncProgress({
@@ -760,8 +825,12 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       message: 'SGO berhasil diakses, tetapi tidak ada baris jamaah.',
       summary,
     });
+    const meta = buildBatchMeta(fast, { startPage, batchPages, startedAt });
     return res.json({
       ...buildEmptyScrapePayload({ result: fast, focusModule }),
+      ...meta,
+      records: [],
+      page: startPage,
       syncSummary: summary,
     });
   }
@@ -777,6 +846,21 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
       focusModule,
       errors: fast.errors,
     }),
+    records: [],
+    page: startPage,
+    batch: {
+      startPage,
+      batchPages,
+      processedPages: 0,
+      pagesFetched: 0,
+      nextPage: null,
+      hasMore: false,
+      totalPages: 0,
+      elapsedMs: Date.now() - startedAt,
+    },
+    nextPage: null,
+    hasMore: false,
+    totalPages: 0,
     code: fast.authError?.code || 'SGO_ERROR',
     supportedModules: supportedModulesPayload(),
   });
@@ -789,6 +873,211 @@ app.post('/api/jamaah/scrape-cookie', async (req, res) => {
 app.get('/api/jamaah/scrape-progress', (req, res) => {
   res.set('Cache-Control', 'no-store');
   return res.json({ success: true, progress: getSyncProgress() });
+});
+
+app.post('/api/jamaah/validate-manifest', async (req, res) => {
+  const url = String(req.body?.url || '').trim();
+  const cookie = String(req.body?.cookie || req.body?.cookies || '').trim();
+  const requestedBatch = Number(
+    req.body?.batchSize || req.body?.limit || req.body?.batch,
+  );
+  const configuredBatch =
+    Number(process.env.SGO_MANIFEST_BATCH_SIZE) ||
+    (isVercelRuntime() ? 25 : 50);
+  const batchSize = Math.max(
+    25,
+    Math.min(50, Math.trunc(requestedBatch || configuredBatch || 50)),
+  );
+  const startIndex = Math.max(
+    0,
+    Math.trunc(Number(req.body?.startIndex || req.body?.cursor || req.body?.offset) || 0),
+  );
+  const onlyMissing = req.body?.onlyMissing === true;
+  const rows = getJamaahData();
+  const candidates = rows.filter((row) => {
+    if (!onlyMissing) return true;
+    const nik = String(row?.nik || row?.ktp || '').trim();
+    const passport = String(
+      row?.passport || row?.paspor || row?.noPaspor || '',
+    ).trim();
+    return !nik || !passport;
+  });
+  const total = candidates.length;
+  const startedAt = Date.now();
+
+  if (!total || startIndex >= total) {
+    const processed = total ? Math.min(startIndex, total) : 0;
+    return res.json({
+      success: true,
+      message: `Validasi NIK & paspor selesai: ${processed}/${total}.`,
+      count: processed,
+      validation: {
+        total,
+        eligible: 0,
+        selected: 0,
+        processed,
+        nextIndex: processed,
+        hasMore: false,
+        batchSize,
+        ok: 0,
+        failed: 0,
+        skipped: 0,
+        noManifest: 0,
+        deadlineReached: false,
+        durationMs: Date.now() - startedAt,
+      },
+      syncSummary: null,
+    });
+  }
+
+  const config = resolveSgoConfig({ url, cookie });
+  if (!config.ok) {
+    const status = config.cookieError ? 428 : 400;
+    return res.status(status).json({
+      success: false,
+      code: config.cookieError ? 'SGO_COOKIE_MISSING' : 'SGO_CONFIG',
+      error: config.urlError || config.cookieError,
+      validation: { total, processed: startIndex, nextIndex: startIndex, hasMore: true },
+    });
+  }
+
+  const started = beginSyncOrConflict(res, {
+    label: 'Validasi NIK & Paspor',
+    modulePath: '/ops/monitoring-jamaah',
+    modules: ['/ops/monitoring-jamaah'],
+    message: 'Menyiapkan validasi manifest...',
+  });
+  if (!started) return;
+
+  const endIndex = Math.min(total, startIndex + batchSize);
+  const selected = candidates.slice(startIndex, endIndex).map((row) => ({ ...row }));
+  const batchCount = selected.length;
+  const estimatedBatches = Math.ceil(total / batchSize);
+  updateSyncProgress({
+    phase: 'manifest-validation',
+    percent: Math.min(99, (endIndex / total) * 100),
+    message: `Memvalidasi NIK & paspor ${endIndex.toLocaleString('id-ID')}/${total.toLocaleString('id-ID')}...`,
+    detail: `Batch ${startIndex + 1}-${endIndex} dari ${total.toLocaleString('id-ID')} jamaah`,
+    rows: endIndex,
+    totalJamaah: total,
+    totalPages: estimatedBatches,
+    pagesFetched: Math.ceil(endIndex / batchSize),
+  });
+
+  try {
+    const deadline = createSgoDeadline(isVercelRuntime() ? 50000 : 5 * 60 * 1000);
+    const enriched = await enrichJamaahWithManifest(selected, config, {
+      max: selected.length,
+      deadline,
+      log: false,
+      concurrency: isVercelRuntime() ? 4 : undefined,
+      timeoutMs: isVercelRuntime() ? 8000 : undefined,
+      progressOffset: startIndex,
+      progressTotal: total,
+      updateProgress: (patch) =>
+        updateSyncProgress({
+          ...patch,
+          phase: 'manifest-validation',
+        }),
+    });
+    const stats = enriched.stats;
+    upsertJamaahRows(enriched.rows, {
+      type: 'manifest-validation',
+      modules: ['/ops/monitoring-jamaah'],
+      url: config.baseUrl,
+    });
+    const cache = ensureManifestCache({ force: true });
+    const stored = getJamaahData();
+    const ok = Number(stats.fetched || 0) + Number(stats.cacheHits || 0);
+    const noManifest = batchCount - Number(stats.eligible || 0);
+    const skipped = noManifest + Number(stats.skipped || 0);
+    const nextIndex = endIndex;
+    const hasMore = nextIndex < total;
+    const summary = buildSyncSummary({
+      rows: enriched.rows,
+      stored,
+      manifest: stats,
+      source: getJamaahSource(),
+      cache,
+      modules: ['/ops/monitoring-jamaah'],
+      startedAt,
+      extra: {
+        validationProcessed: nextIndex,
+        validationTotal: total,
+        validationFailed: Number(stats.failed || 0),
+        validationSkipped: skipped,
+      },
+    });
+    finishSyncProgress({
+      message: hasMore
+        ? `Validasi NIK & paspor ${nextIndex.toLocaleString('id-ID')}/${total.toLocaleString('id-ID')} selesai.`
+        : `Validasi NIK & paspor selesai: ${total.toLocaleString('id-ID')}/${total.toLocaleString('id-ID')}.`,
+      detail: `${ok.toLocaleString('id-ID')} OK • ${Number(stats.failed || 0).toLocaleString('id-ID')} gagal • ${skipped.toLocaleString('id-ID')} tanpa manifest`,
+      summary,
+      rows: nextIndex,
+      totalJamaah: total,
+      documentsUpdated: summary.documentsUpdated,
+    });
+
+    return res.json({
+      success: true,
+      message: hasMore
+        ? `Validasi batch ${startIndex + 1}-${endIndex} dari ${total.toLocaleString('id-ID')} jamaah selesai.`
+        : `Validasi NIK & paspor selesai untuk ${total.toLocaleString('id-ID')} jamaah.`,
+      count: nextIndex,
+      batchCount,
+      validation: {
+        total,
+        eligible: Number(stats.eligible || 0),
+        selected: Number(stats.selected || 0),
+        processed: nextIndex,
+        nextIndex,
+        hasMore,
+        batchSize,
+        ok,
+        failed: Number(stats.failed || 0),
+        skipped,
+        noManifest,
+        recovered: Number(stats.recovered || 0),
+        cacheHits: Number(stats.cacheHits || 0),
+        deadlineReached: Boolean(stats.deadlineReached),
+        durationMs: Date.now() - startedAt,
+      },
+      syncSummary: summary,
+      cache: {
+        total: cache.total,
+        inserted: cache.inserted || 0,
+        updated: cache.updated || 0,
+        documentsUpdated: cache.documentsUpdated || 0,
+        syncedAt: cache.syncedAt,
+      },
+    });
+  } catch (error) {
+    const message = error.message || 'Validasi manifest gagal.';
+    console.error(`[SGO] Validasi manifest gagal: ${message}`);
+    failSyncProgress(message);
+    const status =
+      error.code === 'SGO_COOKIE_MISSING'
+        ? 428
+        : error.code === 'SGO_CONFIG'
+          ? 400
+          : error.code === 'SGO_AUTH'
+            ? 401
+            : error.code === 'SGO_DEADLINE'
+              ? 504
+              : 502;
+    return res.status(status).json({
+      success: false,
+      code: error.code || 'SGO_ERROR',
+      error: message,
+      validation: {
+        total,
+        processed: startIndex,
+        nextIndex: startIndex,
+        hasMore: true,
+      },
+    });
+  }
 });
 
 /**
