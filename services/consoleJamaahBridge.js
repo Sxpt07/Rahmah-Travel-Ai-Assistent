@@ -13,6 +13,7 @@
 import { classifyIntent } from './aiEngine.js';
 import { findJamaah, getAllJamaah } from '../data/jamaahStore.js';
 import { buildSafeJamaahRow } from './documentStatus.js';
+import { getJamaahAiIndex } from './jamaahAiIndex.js';
 import { resolveOrderQuery } from './orderSearch.js';
 
 const MAX_CHAT_ROWS = 10;
@@ -37,18 +38,19 @@ function orderCountKey(row = {}) {
 }
 
 function withOrderCounts(allRows = [], selectedRows = []) {
+  const indexed = getJamaahAiIndex()?.lookups?.orderCounts || null;
   const counts = new Map();
 
-  // Hitung dari seluruh data jamaah, bukan hanya baris hasil pencarian. Dengan
-  // begitu header order tetap menampilkan jumlah jamaah yang benar meskipun
-  // admin mencari satu nama jamaah di dalam order tersebut.
-  const universe = getAllJamaah();
-  const source = universe.length ? universe : allRows;
-
-  source.forEach((row) => {
-    const key = orderCountKey(row);
-    if (key) counts.set(key, (counts.get(key) || 0) + 1);
-  });
+  if (indexed && Object.keys(indexed).length) {
+    for (const [key, value] of Object.entries(indexed)) counts.set(key, value);
+  } else {
+    const universe = getAllJamaah();
+    const source = universe.length ? universe : allRows;
+    source.forEach((row) => {
+      const key = orderCountKey(row);
+      if (key) counts.set(key, (counts.get(key) || 0) + 1);
+    });
+  }
 
   return selectedRows.map((row, index) => {
     const safe = buildSafeJamaahRow(row, index);

@@ -159,15 +159,8 @@
     const result = await window.SgoSync.runFullSync({
       panel: els.progress,
       button: els.refresh,
-      endpoint: '/api/jamaah/scrape-cookie',
-      validationEndpoint: '/api/jamaah/validate-manifest',
-      body: {
-        focusModule: '/ops/monitoring-jamaah',
-        skipManifest: true,
-        js: true,
-      },
-      validationBody: { js: true },
-      batchPages: 2,
+      endpoint: '/api/jamaah/full-sync',
+      body: { focusModule: '/ops/monitoring-jamaah', js: true },
       label: 'Monitoring Jamaah',
       busyLabel: 'Menyinkronkan...',
       retryAttempts: 3,
@@ -183,9 +176,7 @@
 
     loaded = false;
     await load({ force: true });
-    const count = Number(
-      result.data?.aggregatedCount || result.data?.count || result.rows?.length || 0,
-    );
+    const count = Number(result.data?.storedJamaahCount ?? result.data?.count ?? 0);
     toast(
       'Success',
       result.data?.message ||

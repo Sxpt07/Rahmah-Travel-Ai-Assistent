@@ -13,6 +13,7 @@ import {
   hasRealJamaahData,
   warnIfJamaahStoreEmpty,
 } from '../data/jamaahStore.js';
+import { getJamaahAiSummary } from './jamaahAiIndex.js';
 import {
   RAHMAH_STYLE_MAX_LENGTH,
   RAHMAH_STYLE_SYSTEM,
@@ -113,8 +114,9 @@ function passportOf(j = {}) {
 
 function formatJamaahContext() {
   if (!hasRealJamaahData()) return 'Belum ada data jamaah hasil auto-scrape.';
+  const summary = getJamaahAiSummary();
   const src = getJamaahSource() || {};
-  return `Sumber data: SGO Admin (auto-scrape). Total data: ${src.count || 0}.`;
+  return `Sumber data: SGO Admin (auto-scrape). Total data: ${src.count || 0}.${summary ? ` ${summary}` : ''}`;
 }
 
 function formatJamaahDetail(j = {}) {

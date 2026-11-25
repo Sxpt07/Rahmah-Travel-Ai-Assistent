@@ -1,11 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import {
-  canUseFilesystemPersistence,
-  getRuntimeTempDir,
-  isReadOnlyFsError,
-} from '../services/runtimeEnv.js';
+import { isReadOnlyFsError } from '../services/runtimeEnv.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,10 +9,8 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_RAW_DIR = path.join(__dirname, '..', 'sgo_raw');
 const RAW_DIR = process.env.SGO_RAW_DIR
   ? path.resolve(process.env.SGO_RAW_DIR)
-  : canUseFilesystemPersistence()
-    ? DEFAULT_RAW_DIR
-    : path.join(getRuntimeTempDir(), 'sgo_raw');
-const persistenceEnabled = !process.env.VERCEL && canUseFilesystemPersistence();
+  : DEFAULT_RAW_DIR;
+const persistenceEnabled = true;
 
 export const SGO_RAW_MODULES = Object.freeze([
   '/ops/monitoring-jamaah',

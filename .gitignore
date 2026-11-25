@@ -12,6 +12,7 @@ jamaah_data*.json
 sgo_raw/
 data/*.sqlite
 data/*.sqlite-*
+data/jamaah_ai_index.json
 *.tmp
 *.log
 npm-debug.log*

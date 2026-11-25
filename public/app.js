@@ -413,21 +413,8 @@ function updateModulePresentation() {
 
 function updateScrapeButtonLabel() {
   if (!jamaahCookieBtn || !moduleSelectEl) return;
-  const path = moduleSelectEl.value || DEFAULT_MODULE_PATH;
   const text = jamaahCookieBtn.querySelector('span');
-  if (!text) return;
-  const resume =
-    sgoBatchState.resume && sgoBatchState.resume.focusModule === path
-      ? sgoBatchState.resume
-      : null;
-  const validationResume = Boolean(resume?.skipScrape);
-  const pageResume =
-    resume && !resume.skipScrape && Number(resume.startPage) > 1;
-  text.textContent = validationResume
-    ? `Lanjut Validasi ${Number(resume.validationStartIndex).toLocaleString('id-ID')}`
-    : pageResume
-      ? `Lanjut Sync Hal. ${Number(resume.startPage)}`
-      : sgoModuleCta(path);
+  if (text) text.textContent = sgoModuleCta(moduleSelectEl.value || DEFAULT_MODULE_PATH);
 }
 
 function setupJamaahEvents() {
@@ -498,35 +485,7 @@ function restoreActiveFocus() {
   updateModulePresentation();
 }
 
-const sgoBatchState = { running: false, stop: false, resume: null };
-
-function mergeJamaahRows(existing = [], incoming = []) {
-  const merged = Array.isArray(existing) ? [...existing] : [];
-  const index = new Map();
-  merged.forEach((row, i) => {
-    const key = String(row?.manifestId || row?.jamaahId || row?.orderId || row?.nama || '').trim();
-    if (key) index.set(key, i);
-  });
-  (Array.isArray(incoming) ? incoming : []).forEach((row) => {
-    if (!row || typeof row !== 'object') return;
-    const key = String(row?.manifestId || row?.jamaahId || row?.orderId || row?.nama || '').trim();
-    if (key && index.has(key)) {
-      merged[index.get(key)] = { ...merged[index.get(key)], ...row };
-      return;
-    }
-    if (key) index.set(key, merged.length);
-    merged.push(row);
-  });
-  return merged;
-}
-
 async function handleJamaahCookieScrape() {
-  if (sgoBatchState.running) {
-    sgoBatchState.stop = true;
-    showToast('Info', 'Menghentikan sinkronisasi setelah batch aktif selesai...', 'info');
-    return;
-  }
-
   const focusModule = moduleSelectEl ? moduleSelectEl.value : DEFAULT_MODULE_PATH;
   const moduleLabel = sgoModuleLabel(focusModule);
 
@@ -545,213 +504,84 @@ async function handleJamaahCookieScrape() {
     return;
   }
 
-  const resume = sgoBatchState.resume && sgoBatchState.resume.focusModule === focusModule
-    ? sgoBatchState.resume
-    : null;
   const isManifestFocus = focusModule === '/ops/upload-documents';
-  const skipScrape = Boolean(resume?.skipScrape);
-  const batchPages = 2;
-  const startPage = !skipScrape && resume ? Number(resume.startPage) || 1 : 1;
-  const validationStartIndex = Number(resume?.validationStartIndex) || 0;
-  let aggregatedRows = resume && Array.isArray(resume.rows) ? [...resume.rows] : [];
-  let lastData = null;
-  const priorBatches = resume ? Number(resume.batchCount) || 0 : 0;
+  const emitSyncProgress = (progress) => {
+    document.dispatchEvent(
+      new CustomEvent('umrah:sync-progress', {
+        detail: { ...progress, module: focusModule },
+      }),
+    );
+  };
 
-  sgoBatchState.running = true;
-  sgoBatchState.stop = false;
   if (moduleSelectEl) moduleSelectEl.disabled = true;
   setModuleMenuDisabled(true);
-  if (jamaahCookieBtn) {
-    jamaahCookieBtn.dataset.syncOriginal = jamaahCookieBtn.innerHTML;
-    jamaahCookieBtn.innerHTML = '<i data-lucide="square" class="h-3 w-3 text-red-400"></i><span>Stop Sync</span>';
-    if (window.lucide) lucide.createIcons();
-  }
 
+  let result;
   try {
-    const emitSyncProgress = (progress) => {
-      document.dispatchEvent(
-        new CustomEvent('umrah:sync-progress', {
-          detail: {
-            ...progress,
-            module: focusModule,
-            batchPages,
-            startPage: progress.startPage || startPage,
-            aggregatedCount: progress.aggregatedCount || aggregatedRows.length,
-          },
-        }),
-      );
-    };
-
-    const result = await window.SgoSync.runFullSync({
+    result = await window.SgoSync.runFullSync({
       panel: sgoScrapeProgress,
       button: jamaahCookieBtn,
-      endpoint: `${API_BASE}/api/jamaah/scrape-cookie`,
-      validationEndpoint: `${API_BASE}/api/jamaah/validate-manifest`,
-      body: {
-        js: true,
-        focusModule,
-        skipManifest: true,
-      },
-      validationBody: { js: true },
-      startPage,
-      batchPages,
-      initialRows: aggregatedRows,
-      validationStartIndex,
-      validationBatchSize: 50,
-      skipScrape,
+      endpoint: `${API_BASE}/api/jamaah/full-sync`,
+      body: { js: true, focusModule },
       label: moduleLabel,
-      busyLabel: sgoBatchState.stop ? 'Menghentikan...' : `Memuat ${moduleLabel}...`,
+      busyLabel: `Memuat ${moduleLabel}...`,
       autoHideMs: 15000,
       disableButton: false,
       manageButton: false,
-      stopRequested: () => sgoBatchState.stop,
       onProgress: isManifestFocus ? emitSyncProgress : undefined,
-      onValidationProgress: isManifestFocus ? emitSyncProgress : undefined,
-      onBatch: ({ aggregatedRows: rows, data, hasMore, nextPage, batchIndex }) => {
-        aggregatedRows = rows;
-        void fetchJamaahStatus();
-        document.dispatchEvent(
-          new CustomEvent('umrah:data-updated', {
-            detail: {
-              source: 'scrape-batch',
-              count: rows.length,
-              module: focusModule,
-              hasMore,
-              nextPage,
-              batchCount: priorBatches + batchIndex,
-              aggregatedCount: rows.length,
-              countFromServer: Number(data?.count || 0),
-            },
-          }),
-        );
-      },
     });
-
-    const validationResumeIndex = () =>
-      Number(
-        result.validation?.resume?.startIndex ||
-          result.resume?.startIndex ||
-          validationStartIndex,
-      ) || 0;
-
-    lastData = result.data || null;
-    if (Array.isArray(result.rows)) aggregatedRows = result.rows;
-
-    if (result.stopped) {
-      if (result.stage === 'validation' || skipScrape) {
-        const index = validationResumeIndex();
-        sgoBatchState.resume = {
-          focusModule,
-          startPage: 1,
-          rows: aggregatedRows,
-          batchCount: priorBatches,
-          validationStartIndex: index,
-          skipScrape: true,
-        };
-        showToast(
-          'Info',
-          `Validasi dihentikan. Lanjut dari jamaah ke ${index.toLocaleString('id-ID')}.`,
-          'info',
-        );
-      } else {
-        sgoBatchState.resume = {
-          focusModule,
-          startPage: Number(result.resume?.startPage) || startPage,
-          rows: aggregatedRows,
-          batchCount: priorBatches + (Number(result.batches) || 0),
-        };
-        showToast(
-          'Info',
-          `Sinkronisasi dihentikan. ${aggregatedRows.length.toLocaleString('id-ID')} jamaah sudah tersimpan. Klik lagi untuk lanjut.`,
-          'info',
-        );
-      }
-      return;
-    }
-
-    if (!result.ok) {
-      if (!result.busy) {
-        const errorData = result.data || {};
-        const errorMessage = String(result.error || errorData.error || 'Gagal sinkronisasi SGO');
-        if (errorData.code === 'SGO_COOKIE_MISSING' || errorData.code === 'SGO_AUTH') {
-          if (errorData.code === 'SGO_AUTH' && window.RahmahSgoCookie) {
-            window.RahmahSgoCookie.markExpired(errorMessage);
-          } else if (window.RahmahSgoCookie) {
-            window.RahmahSgoCookie.markEmpty(errorMessage);
-          }
-          if (window.RahmahSgoCookie) window.RahmahSgoCookie.open();
-          sgoBatchState.resume = null;
-        } else if (result.stage === 'validation' || skipScrape) {
-          sgoBatchState.resume = {
-            focusModule,
-            startPage: 1,
-            rows: aggregatedRows,
-            batchCount: priorBatches,
-            validationStartIndex: validationResumeIndex(),
-            skipScrape: true,
-          };
-        } else {
-          sgoBatchState.resume = {
-            focusModule,
-            startPage: Number(result.resume?.startPage) || startPage,
-            rows: aggregatedRows,
-            batchCount: priorBatches + (Number(result.batches) || 0),
-          };
-        }
-        const detail = String(errorData.detail || '').trim();
-        const suffix = sgoBatchState.resume ? ' Klik sinkronisasi lagi untuk mencoba batch ini.' : '';
-        const toastMessage =
-          (detail && detail !== errorMessage ? `${errorMessage}\n${detail}` : errorMessage) + suffix;
-        showToast('Error', toastMessage, 'error');
-      }
-      return;
-    }
-
-    if (result.busy) {
-      showToast('Info', result.data?.message || 'Sinkronisasi SGO yang sedang berjalan telah selesai.', 'info');
-      await fetchJamaahStatus();
-      return;
-    }
-
-    sgoBatchState.resume = null;
-    const count = skipScrape
-      ? Number(lastData?.validation?.total || aggregatedRows.length || 0)
-      : aggregatedRows.length || Number(lastData?.aggregatedCount || lastData?.count || 0);
-    const isEmpty = !skipScrape && (lastData?.empty === true || count === 0);
-    showToast(
-      isEmpty ? 'Info' : 'Success',
-      lastData?.message || `Berhasil memuat ${moduleLabel}`,
-      isEmpty ? 'warning' : 'success',
-    );
-    try {
-      localStorage.setItem('umrah_active_focus_v2', focusModule);
-    } catch (e) {}
-    if (sgoLiveBadge && sgoLiveBadgeText) {
-      sgoLiveBadgeText.textContent = `SGO Live - ${count.toLocaleString('id-ID')} jamaah`;
-      sgoLiveBadge.classList.remove('hidden');
-    }
-    await fetchJamaahStatus();
-    document.dispatchEvent(
-      new CustomEvent('umrah:data-updated', {
-        detail: {
-          source: result.stage === 'validation' ? 'validation' : 'scrape',
-          count,
-          module: focusModule,
-        },
-      }),
-    );
   } finally {
-    sgoBatchState.running = false;
-    sgoBatchState.stop = false;
     if (moduleSelectEl) moduleSelectEl.disabled = false;
     setModuleMenuDisabled(false);
-    if (jamaahCookieBtn && jamaahCookieBtn.dataset.syncOriginal) {
-      jamaahCookieBtn.innerHTML = jamaahCookieBtn.dataset.syncOriginal;
-      delete jamaahCookieBtn.dataset.syncOriginal;
-    }
     updateScrapeButtonLabel();
     if (window.lucide) lucide.createIcons();
   }
+
+  if (!result?.ok) {
+    if (!result?.busy) {
+      const errorData = result?.data || {};
+      const errorMessage = String(result?.error || errorData.error || 'Gagal sinkronisasi SGO');
+      if (errorData.code === 'SGO_COOKIE_MISSING' || errorData.code === 'SGO_AUTH') {
+        if (errorData.code === 'SGO_AUTH' && window.RahmahSgoCookie) {
+          window.RahmahSgoCookie.markExpired(errorMessage);
+        } else if (window.RahmahSgoCookie) {
+          window.RahmahSgoCookie.markEmpty(errorMessage);
+        }
+        if (window.RahmahSgoCookie) window.RahmahSgoCookie.open();
+      }
+      const detail = String(errorData.detail || '').trim();
+      showToast(
+        'Error',
+        detail && detail !== errorMessage ? `${errorMessage}\n${detail}` : errorMessage,
+        'error',
+      );
+    }
+    return;
+  }
+
+  if (result.busy) {
+    showToast('Info', result.data?.message || 'Sinkronisasi SGO lain sudah selesai.', 'info');
+    await fetchJamaahStatus();
+    return;
+  }
+
+  const data = result.data || {};
+  const count = Number(data.storedJamaahCount ?? data.count ?? 0);
+  const isEmpty = data.empty === true || count === 0;
+  showToast(isEmpty ? 'Info' : 'Success', data.message || `Berhasil memuat ${moduleLabel}`, isEmpty ? 'warning' : 'success');
+  try {
+    localStorage.setItem('umrah_active_focus_v2', focusModule);
+  } catch (e) {}
+  if (sgoLiveBadge && sgoLiveBadgeText) {
+    sgoLiveBadgeText.textContent = `SGO Live • ${count.toLocaleString('id-ID')} jamaah`;
+    sgoLiveBadge.classList.remove('hidden');
+  }
+  await fetchJamaahStatus();
+  document.dispatchEvent(
+    new CustomEvent('umrah:data-updated', {
+      detail: { source: 'full-sync', count, module: focusModule },
+    }),
+  );
 }
 
 async function handleJamaahClear() {

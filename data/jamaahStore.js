@@ -2,24 +2,26 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  canUseFilesystemPersistence,
   isReadOnlyFsError,
   resolveWritablePath,
 } from '../services/runtimeEnv.js';
+import {
+  getJamaahAiIndex,
+  refreshJamaahAiIndex,
+} from '../services/jamaahAiIndex.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DATA_FILE = process.env.JAMAAH_DATA_FILE
   ? resolveWritablePath(process.env.JAMAAH_DATA_FILE, 'jamaah_data.json')
-  : canUseFilesystemPersistence()
-    ? path.join(__dirname, '..', 'jamaah_data.json')
-    : resolveWritablePath(
-        path.join(__dirname, '..', 'jamaah_data.json'),
-        'jamaah_data.json',
-      );
+  : path.join(__dirname, '..', 'jamaah_data.json');
 const DATA_FILE_VERSION = 1;
-const persistenceEnabled = !process.env.VERCEL && canUseFilesystemPersistence();
+const persistenceEnabled = true;
+
+function syncAiIndex() {
+  refreshJamaahAiIndex(activeJamaah, sourceInfo);
+}
 
 let activeJamaah = [];
 let sourceInfo = null;
@@ -405,6 +407,7 @@ export function loadJamaahDataFromDisk() {
       `[jamaahStore] Data jamaah dimuat dari ${path.basename(DATA_FILE)}: ` +
         `${activeJamaah.length} jamaah (sumber: ${sourceInfo?.type || 'file'}).`,
     );
+    if (!getJamaahAiIndex()) syncAiIndex();
     return true;
   } catch (err) {
     if (!isReadOnlyFsError(err)) {
@@ -421,6 +424,7 @@ export function clearJamaahData(reason = 'manual') {
   sourceInfo = null;
   lastEmptyWarningAt = 0;
   removePersistedJamaahData(reason);
+  syncAiIndex();
   console.log(
     `[jamaahStore] Data jamaah dikosongkan (${reason}). ` +
       `Sebelumnya ${previousCount} jamaah dari ${previousType}. ` +
@@ -1168,6 +1172,7 @@ export function setJamaahData(list = [], info = {}) {
     count: activeJamaah.length,
   };
   persistJamaahData();
+  syncAiIndex();
   return activeJamaah;
 }
 
@@ -1224,6 +1229,7 @@ export function upsertJamaahRows(rows = [], info = {}) {
     count: activeJamaah.length,
   };
   persistJamaahData();
+  syncAiIndex();
   return { inserted, updated, documentsUpdated, total: activeJamaah.length };
 }
 
@@ -1281,5 +1287,6 @@ export function getAllJamaah() {
 }
 
 loadJamaahDataFromDisk();
+if (!getJamaahAiIndex()) syncAiIndex();
 
 export default { setJamaahData, upsertJamaahRows, clearJamaahData, hasRealJamaahData, getActiveJamaah, getJamaahData, getJamaahSource, findJamaah, hasJamaahNameMatch, hasJamaahPackageMatch, hasJamaahPassportMatch, hasJamaahRtbMatch, formatJamaahDetail, getAllJamaah, extractOrderShortCode, getOrderAliases, loadJamaahDataFromDisk, getJamaahDataFilePath };

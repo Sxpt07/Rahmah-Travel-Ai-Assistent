@@ -1,18 +1,8 @@
-// `dotenv` WAJIB dimuat paling awal supaya SGO_ADMIN_SESSION dan SGO_BASE_URL
-// sudah tersedia sebelum modul ini dipakai.
 import dotenv from 'dotenv';
 import path from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as cheerio from 'cheerio';
-let puppeteerModulePromise = null;
-
-async function loadPuppeteer() {
-  if (!puppeteerModulePromise) {
-    puppeteerModulePromise = import('puppeteer').then((module) => module.default || module);
-  }
-  return puppeteerModulePromise;
-}
 import {
   isPersistedSgoModule,
   saveSgoRawError,
@@ -21,12 +11,7 @@ import {
 import { parseDepartureDate } from './departureDate.js';
 import { normalizeCookieHeader } from './sgoCookie.js';
 import { getRequestSgoCookieHeader } from './sgoRequestContext.js';
-import { isVercelRuntime } from './runtimeEnv.js';
-import {
-  startSyncProgress,
-  syncPercentFromPages,
-  updateSyncProgress,
-} from './syncProgress.js';
+import { updateSyncProgress } from './syncProgress.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,72 +45,10 @@ export const SGO_BROWSER_HEADERS = Object.freeze({
   'sec-ch-ua-platform': '"Windows"',
 });
 
-const VERCEL_RUNTIME = isVercelRuntime();
-const SCRAPE_BUDGET_MS = Math.max(
-  15000,
-  Math.min(envNumber('SGO_SCRAPE_BUDGET_MS', VERCEL_RUNTIME ? 22000 : 10 * 60 * 1000), 300000),
-);
-const SCRAPE_DEADLINE_MS = Math.max(
-  SCRAPE_BUDGET_MS,
-  Math.min(envNumber('SGO_SCRAPE_DEADLINE_MS', VERCEL_RUNTIME ? 300000 : 10 * 60 * 1000), 300000),
-);
-const DEFAULT_BATCH_PAGES = Math.max(
+const PAGE_CONCURRENCY = Math.max(
   1,
-  Math.min(Math.trunc(envNumber('SGO_BATCH_PAGES', 2)), 2),
+  Math.min(Math.trunc(envNumber('SGO_PAGE_CONCURRENCY', 8)), 10),
 );
-const BUDGET_STOP_WINDOW_MS = 2500;
-const REQUEST_DEADLINE_RESERVE_MS = 1500;
-const UNBOUNDED_PAGES = Number.MAX_SAFE_INTEGER;
-
-function createScrapeDeadline(ms = SCRAPE_DEADLINE_MS) {
-  const totalMs = Math.max(1000, Number(ms) || SCRAPE_DEADLINE_MS);
-  const startedAt = Date.now();
-  const deadlineAt = startedAt + totalMs;
-  return {
-    startedAt,
-    deadlineAt,
-    totalMs,
-    remainingMs() {
-      return deadlineAt - Date.now();
-    },
-    isExpired() {
-      return Date.now() >= deadlineAt;
-    },
-  };
-}
-
-export const createSgoDeadline = createScrapeDeadline;
-
-function remainingBudgetMs(deadline) {
-  const remaining = Number(deadline?.remainingMs?.());
-  return Number.isFinite(remaining) ? remaining : Infinity;
-}
-
-function budgetExhausted(deadline, windowMs = BUDGET_STOP_WINDOW_MS) {
-  return remainingBudgetMs(deadline) <= windowMs;
-}
-
-function requestTimeoutForDeadline(deadline, fallbackMs) {
-  const remaining = remainingBudgetMs(deadline);
-  if (!Number.isFinite(remaining)) return fallbackMs;
-  return Math.max(
-    1000,
-    Math.min(Number(fallbackMs) || 1000, remaining - REQUEST_DEADLINE_RESERVE_MS),
-  );
-}
-
-function scrapeDeadlineError(deadline, context = 'sinkronisasi SGO') {
-  const seconds = Math.max(1, Math.round((Number(deadline?.totalMs) || SCRAPE_DEADLINE_MS) / 1000));
-  return buildError(
-    `${context} melewati batas waktu ${seconds} detik. Di Vercel, sinkronisasi penuh butuh waktu lebih lama dari batas serverless; coba lagi dengan modul/fokus lebih kecil atau jalankan dari server Node lokal untuk sync penuh.`,
-    'SGO_DEADLINE',
-    { status: 504, deadlineMs: Number(deadline?.totalMs) || SCRAPE_DEADLINE_MS },
-  );
-}
-
-function assertNotPastDeadline(deadline, context) {
-  if (deadline?.isExpired?.()) throw scrapeDeadlineError(deadline, context);
-}
 
 // Daftar lengkap modul SGO Admin (dikembalikan ke 16 modul).
 // Hanya Monitoring Jamaah yang menjadi sumber data jamaah; modul lain tetap
@@ -184,7 +107,7 @@ const MANIFEST_TIMEOUT_MS = Math.max(
 );
 const MANIFEST_CONCURRENCY = Math.max(
   1,
-  Math.min(envNumber('SGO_MANIFEST_CONCURRENCY', 4), 20),
+  Math.min(envNumber('SGO_MANIFEST_CONCURRENCY', 8), 16),
 );
 const MANIFEST_CACHE_TTL_MS = Math.max(
   0,
@@ -192,28 +115,11 @@ const MANIFEST_CACHE_TTL_MS = Math.max(
 );
 const MANIFEST_RETRY_CONCURRENCY = Math.max(
   1,
-  Math.min(envNumber('SGO_MANIFEST_RETRY_CONCURRENCY', 2), 10),
+  Math.min(envNumber('SGO_MANIFEST_RETRY_CONCURRENCY', 4), 8),
 );
 const manifestFieldCache = new Map();
-
-// Pagination hanya dipakai untuk modul sumber jamaah. Halaman 2 dan seterusnya
-// diminta berurutan dengan jeda agar tidak memicu rate-limit SGO.
-const PAGINATION_ENABLED = !/^(0|false|no|off)$/i.test(
-  String(process.env.SGO_PAGINATION_ENABLED ?? 'true').trim(),
-);
-const rawPaginationDelay = Number(process.env.SGO_PAGINATION_DELAY_MS);
-const PAGINATION_DELAY_MS = Math.max(
-  0,
-  Math.min(
-    Number.isFinite(rawPaginationDelay) ? rawPaginationDelay : 500,
-    10000,
-  ),
-);
 const PAGINATION_PAGE_PARAM =
   String(process.env.SGO_PAGE_PARAM || 'page').trim() || 'page';
-
-// Retry + backoff untuk error transien SGO (HTTP 500/502/503/504/429/timeout).
-// Pagination tidak boleh berhenti permanen hanya karena satu halaman 502.
 const SGO_HTTP_RETRY_ATTEMPTS = Math.max(
   1,
   Math.min(envNumber('SGO_HTTP_RETRY_ATTEMPTS', 4), 6),
@@ -226,14 +132,6 @@ const SGO_HTTP_RETRY_MAX_MS = Math.max(
   SGO_HTTP_RETRY_BASE_MS,
   Math.min(envNumber('SGO_HTTP_RETRY_MAX_MS', 10000), 60000),
 );
-const SGO_PAGE_FAILURE_COOLDOWN_MS = Math.max(
-  0,
-  Math.min(envNumber('SGO_PAGE_FAILURE_COOLDOWN_MS', 2500), 30000),
-);
-const SGO_MAX_CONSECUTIVE_PAGE_FAILURES = Math.max(
-  1,
-  Math.min(envNumber('SGO_MAX_CONSECUTIVE_PAGE_FAILURES', 6), 20),
-);
 const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 const MONITORING_JAMAAH_PATH = '/ops/monitoring-jamaah';
@@ -241,33 +139,6 @@ const UPLOAD_DOCUMENTS_PATH = '/ops/upload-documents';
 const UPLOAD_DOCUMENTS_SEARCH = String(
   process.env.SGO_UPLOAD_SEARCH ?? 'ORD',
 ).trim();
-
-/** Token sesi SGO dari .env, tanpa prefix `sgo_admin_session=`. */
-export function getEnvSession() {
-  return String(process.env.SGO_ADMIN_SESSION || '')
-    .trim()
-    .replace(/^sgo_admin_session\s*=\s*/i, '');
-}
-
-/** Header Cookie siap pakai dari SGO_ADMIN_SESSION (.env). */
-export function getEnvCookieHeader() {
-  const session = getEnvSession();
-  return session ? `sgo_admin_session=${session}` : '';
-}
-
-/** Validasi env + log error yang jelas bila cookie belum diset. */
-export function validateSgoEnv() {
-  const session = getEnvSession();
-  if (!session) {
-    console.error(
-      '[SGO] ERROR: SGO_ADMIN_SESSION kosong atau tidak ditemukan di .env. ' +
-        'Isi SGO_ADMIN_SESSION di .env (atau tempel cookie di UI) sebelum scrape.',
-    );
-    return false;
-  }
-  console.log(`[SGO] SGO_ADMIN_SESSION terbaca dari .env (${session.length} karakter).`);
-  return true;
-}
 
 export const cleanCell = (value = '') => String(value).replace(/\s+/g, ' ').trim();
 
@@ -334,24 +205,19 @@ export function resolveSgoModule(value = '') {
 
 export { normalizeCookieHeader };
 
-export function resolveSgoConfig({ url, cookie, useEnvCookie = false } = {}) {
+export function resolveSgoConfig({ url, cookie } = {}) {
   const rawUrl = String(
     url || process.env.SGO_BASE_URL || 'https://sgo.rahmahgrup.id',
   ).trim();
   const explicitCookie = String(cookie || '').trim();
   const deviceCookie = getRequestSgoCookieHeader();
-  const envCookie = getEnvCookieHeader();
-  const normalizedRequestCookie = normalizeCookieHeader(
-    explicitCookie || deviceCookie,
-  );
-  const cookieHeader = useEnvCookie ? envCookie : normalizedRequestCookie;
-  const cookieSource = useEnvCookie
-    ? 'env'
-    : explicitCookie
-      ? 'request'
-      : normalizedRequestCookie
-        ? 'device'
-        : '';
+  const normalizedCookie = normalizeCookieHeader(explicitCookie || deviceCookie);
+  const cookieHeader = normalizedCookie;
+  const cookieSource = explicitCookie
+    ? 'request'
+    : normalizedCookie
+      ? 'device'
+      : '';
 
   let baseUrl = '';
   let urlError = '';
@@ -374,15 +240,12 @@ export function resolveSgoConfig({ url, cookie, useEnvCookie = false } = {}) {
 
   const cookieError = cookieHeader
     ? ''
-    : useEnvCookie
-      ? 'SGO_ADMIN_SESSION belum diisi di .env.'
-      : 'Cookie SGO belum diatur di perangkat ini. Klik tombol Cookie SGO di header untuk menyimpan sesi login.';
+    : 'Cookie SGO belum diatur di perangkat ini. Klik tombol Cookie SGO di header untuk menyimpan sesi login.';
 
   return {
     baseUrl,
     cookieHeader,
     cookieSource,
-    envCookie,
     urlError,
     cookieError,
     ok: !urlError && !cookieError,
@@ -945,92 +808,60 @@ async function fetchManifestFields(manifestId, config, options = {}) {
 
   const targetUrl = `${config.baseUrl}/ops/monitoring-jamaah/${encodeURIComponent(id)}/edit?embed=1`;
   const attempts = Math.max(1, Math.min(Number(options.attempts) || 2, 6));
-  const baseDelayMs = Math.max(
-    0,
-    Math.min(Number(options.baseDelayMs) || 250, 15000),
-  );
-  const deadline = options.deadline || null;
+  const baseDelayMs = Math.max(0, Math.min(Number(options.baseDelayMs) || 250, 15000));
+  const configuredTimeout = Number(options.timeoutMs);
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? Math.min(configuredTimeout, 60000)
+      : MANIFEST_TIMEOUT_MS;
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    if (budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
-      throw scrapeDeadlineError(deadline, `Pengambilan manifest ${id}`);
-    }
-    const configuredTimeout = Number(options.timeoutMs);
-    const timeoutMs = requestTimeoutForDeadline(
-      deadline,
-      Number.isFinite(configuredTimeout) && configuredTimeout > 0
-        ? configuredTimeout
-        : MANIFEST_TIMEOUT_MS,
-    );
     try {
-      let response;
-      try {
-        response = await fetch(targetUrl, {
-          headers: {
-            ...SGO_BROWSER_HEADERS,
-            // Wajib: setiap request ke SGO membawa sesi admin.
-            Cookie: config.cookieHeader,
-          },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-      } catch (networkError) {
-        const cause =
-          networkError?.cause?.code ||
-          networkError?.cause?.message ||
-          networkError?.name ||
-          '';
-        throw buildError(
-          `Manifest ${id} gagal dihubungi${cause ? ` (${cause})` : ''}.`,
-          'SGO_NETWORK',
-          { manifestId: id, cause },
-        );
-      }
+      const response = await fetch(targetUrl, {
+        headers: {
+          ...SGO_BROWSER_HEADERS,
+          Cookie: config.cookieHeader,
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
       const html = await response.text();
 
       if (looksLikeLoginPage(html, response.url || targetUrl)) {
         throw buildError(
-          'Sesi login habis saat mengambil manifest jamaah. Perbarui SGO_ADMIN_SESSION.',
+          'Sesi login habis saat mengambil manifest jamaah. Perbarui cookie SGO perangkat ini.',
           'SGO_AUTH',
           { manifestId: id },
         );
       }
       if (!response.ok) {
         const retryAfter = Number(response.headers.get('retry-after'));
-        throw buildError(
-          `Manifest ${id} mengembalikan HTTP ${response.status}.`,
-          'SGO_HTTP',
-          {
-            manifestId: id,
-            status: response.status,
-            retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
-          },
-        );
+        throw buildError(`Manifest ${id} mengembalikan HTTP ${response.status}.`, 'SGO_HTTP', {
+          manifestId: id,
+          status: response.status,
+          retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
+        });
       }
 
       const fields = extractManifestFields(html);
       if (!fields.pageOk) {
-        throw buildError(
-          `Halaman manifest ${id} tidak dikenali.`,
-          'SGO_MANIFEST_PARSE',
-          { manifestId: id },
-        );
+        throw buildError(`Halaman manifest ${id} tidak dikenali.`, 'SGO_MANIFEST_PARSE', {
+          manifestId: id,
+        });
       }
 
       manifestFieldCache.set(id, { fields, fetchedAt: Date.now() });
       return { fields, cached: false };
     } catch (error) {
       lastError = error;
-      // Auth tidak pernah di-retry: cookie harus diperbarui manual.
-      if (error?.code === 'SGO_AUTH' || error?.code === 'SGO_DEADLINE') break;
+      if (error?.code === 'SGO_AUTH') break;
       if (attempt < attempts) {
         const retryAfter = Number(error?.retryAfter);
         const waitMs =
           Number.isFinite(retryAfter) && retryAfter > 0
             ? Math.min(retryAfter * 1000, 15000)
             : Math.min(baseDelayMs * 2 ** (attempt - 1), 15000);
-        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) break;
         if (waitMs > 0) await delay(waitMs);
       }
     }
@@ -1095,20 +926,11 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
       : options.updateProgress === false
         ? () => {}
         : updateSyncProgress;
-  const deadline = options.deadline || null;
   const concurrency = Math.max(
     1,
-    Math.min(Number(options.concurrency) || MANIFEST_CONCURRENCY, 20),
+    Math.min(Number(options.concurrency) || MANIFEST_CONCURRENCY, 16),
   );
-  const configuredMax = Number(options.max);
-  const maxRows = Number.isFinite(configuredMax)
-    ? Math.max(0, Math.trunc(configuredMax))
-    : list.length;
-  const progressOffset = Math.max(0, Math.trunc(Number(options.progressOffset) || 0));
-  const progressTotal = Math.max(
-    progressOffset + list.length,
-    Math.trunc(Number(options.progressTotal) || 0),
-  );
+  const progressTotal = list.length;
   const stats = {
     total: list.length,
     eligible: 0,
@@ -1124,8 +946,6 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     withPassport: 0,
     withBoth: 0,
     ms: 0,
-    deadlineMs: Number(deadline?.totalMs) || 0,
-    deadlineReached: false,
     failures: [],
   };
 
@@ -1135,9 +955,9 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
 
   const eligible = list.filter((row) => row && cleanCell(row.manifestId));
   stats.eligible = eligible.length;
-  const selected = eligible.slice(0, maxRows);
+  const selected = eligible;
   stats.selected = selected.length;
-  stats.limited = Math.max(0, eligible.length - selected.length);
+  stats.limited = 0;
   if (!eligible.length) {
     if (log && list.length) {
       console.warn(
@@ -1180,7 +1000,6 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     );
   }
 
-  let budgetStopped = false;
   const failures = [];
   await mapWithConcurrency(selected, concurrency, async (row) => {
     if (authError) {
@@ -1188,17 +1007,9 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
       done += 1;
       return;
     }
-    if (budgetStopped || budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
-      stats.skipped += 1;
-      stats.deadlineReached = true;
-      budgetStopped = true;
-      done += 1;
-      return;
-    }
 
     try {
       const result = await fetchManifestFields(row.manifestId, config, {
-        deadline,
         timeoutMs: options.timeoutMs,
       });
       row.manifestFetched = true;
@@ -1215,10 +1026,6 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
         message: error?.message || '',
       });
       if (error?.code === 'SGO_AUTH') authError = error;
-      if (error?.code === 'SGO_DEADLINE') {
-        budgetStopped = true;
-        stats.deadlineReached = true;
-      }
       if (stats.failed <= 5) {
         console.warn(
           `[SGO] Manifest ${row.manifestId} gagal (${error?.code || 'SGO_MANIFEST'}): ${error.message}`,
@@ -1227,26 +1034,23 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     } finally {
       done += 1;
       if (done % 10 === 0 || done === selected.length) {
-        const current = progressOffset + done;
+        const current = done;
         updateProgress({
           phase: 'manifest',
-          percent: 82 + (current / Math.max(1, progressTotal)) * 11,
+          percent: 70 + (current / Math.max(1, progressTotal)) * 25,
           message: `Memvalidasi NIK & paspor ${current.toLocaleString('id-ID')}/${progressTotal.toLocaleString('id-ID')}...`,
           detail: `${stats.fetched + stats.cacheHits} manifest OK • ${stats.failed} gagal`,
         });
       }
       if (log && (done % 50 === 0 || done === selected.length)) {
         console.log(
-          `[SGO] Progress manifest ${progressOffset + done}/${progressTotal} | OK ${stats.fetched + stats.cacheHits} | gagal ${stats.failed}`,
+          `[SGO] Progress manifest ${done}/${progressTotal} | OK ${stats.fetched + stats.cacheHits} | gagal ${stats.failed}`,
         );
       }
     }
   });
 
-  // Pass kedua: hanya manifest yang gagal, concurrency lebih rendah dan
-  // backoff lebih panjang. Ini menangani rate-limit/timeout sesaat yang
-  // biasanya muncul di akhir scrape saat ratusan request sudah berjalan.
-  if (!authError && !budgetStopped && !budgetExhausted(deadline) && failures.length) {
+  if (!authError && failures.length) {
     const retryCandidates = [...failures];
     stats.retried = retryCandidates.length;
     const retryConcurrency = Math.min(MANIFEST_RETRY_CONCURRENCY, concurrency);
@@ -1274,17 +1078,10 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
           retryDone += 1;
           return;
         }
-        if (budgetStopped || budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
-          stats.deadlineReached = true;
-          budgetStopped = true;
-          retryDone += 1;
-          return;
-        }
         try {
           const result = await fetchManifestFields(failure.manifestId, config, {
             attempts: Math.max(3, Math.min(SGO_HTTP_RETRY_ATTEMPTS, 6)),
             baseDelayMs: retryBaseDelay,
-            deadline,
             timeoutMs: options.timeoutMs,
           });
           failure.row.manifestFetched = true;
@@ -1297,10 +1094,6 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
           failure.status = Number(error?.status) || null;
           failure.message = error?.message || '';
           if (error?.code === 'SGO_AUTH') authError = error;
-          if (error?.code === 'SGO_DEADLINE') {
-            budgetStopped = true;
-            stats.deadlineReached = true;
-          }
           if (log && retryFailedLogged < 20) {
             retryFailedLogged += 1;
             console.warn(
@@ -1353,7 +1146,6 @@ export async function enrichJamaahWithManifest(rows = [], config, options = {}) 
     if (nik && passport) stats.withBoth += 1;
   }
   stats.ms = Date.now() - started;
-  if (budgetStopped || budgetExhausted(deadline)) stats.deadlineReached = true;
 
   if (authError) {
     console.error(`[SGO] Enrichment manifest dihentikan: ${authError.message}`);
@@ -1615,15 +1407,12 @@ function retryWaitMs(attempt, error) {
  * Error auth tidak di-retry karena cookie harus diperbarui manual.
  */
 async function fetchSgoHtml(targetUrl, config, options = {}) {
-  const { modulePath = '', page = 1, persistRawPage = false, deadline = null } = options;
+  const { modulePath = '', page = 1, persistRawPage = false } = options;
   let lastError = null;
 
   for (let attempt = 1; attempt <= SGO_HTTP_RETRY_ATTEMPTS; attempt += 1) {
-    if (budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
-      throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
-    }
     const started = Date.now();
-    const timeoutMs = requestTimeoutForDeadline(deadline, REQUEST_TIMEOUT_MS);
+    const timeoutMs = REQUEST_TIMEOUT_MS;
     let response;
 
     try {
@@ -1651,9 +1440,6 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
       if (attempt < SGO_HTTP_RETRY_ATTEMPTS && isRetryableSgoError(wrapped)) {
         const waitMs = retryWaitMs(attempt, wrapped);
-        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) {
-          throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
-        }
         console.warn(
           `[SGO Retry] ${modulePath || targetUrl} hal. ${page} gagal ` +
             `(${wrapped.code}) attempt ${attempt}/${SGO_HTTP_RETRY_ATTEMPTS}. ` +
@@ -1688,9 +1474,6 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
       if (attempt < SGO_HTTP_RETRY_ATTEMPTS && isRetryableSgoError(wrapped)) {
         const waitMs = retryWaitMs(attempt, wrapped);
-        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) {
-          throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
-        }
         console.warn(
           `[SGO Retry] ${modulePath || targetUrl} hal. ${page} gagal membaca body ` +
             `attempt ${attempt}/${SGO_HTTP_RETRY_ATTEMPTS}. Coba lagi dalam ${waitMs}ms...`,
@@ -1751,9 +1534,6 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
 
       if (attempt < SGO_HTTP_RETRY_ATTEMPTS && isRetryableSgoError(httpError)) {
         const waitMs = retryWaitMs(attempt, httpError);
-        if (remainingBudgetMs(deadline) <= waitMs + REQUEST_DEADLINE_RESERVE_MS) {
-          throw scrapeDeadlineError(deadline, `Pengambilan ${modulePath || targetUrl}`);
-        }
         console.warn(
           `[SGO Retry] ${modulePath || targetUrl} hal. ${page} HTTP ${response.status} ` +
             `attempt ${attempt}/${SGO_HTTP_RETRY_ATTEMPTS}. Coba lagi dalam ${waitMs}ms...`,
@@ -1801,22 +1581,19 @@ async function fetchSgoHtml(targetUrl, config, options = {}) {
  */
 export async function fetchSgoModule(modulePath, config, options = {}) {
   const normalizedPath = normalizeModulePath(modulePath);
-  const { page = 1, persistRaw = true, deadline = null } = options;
+  const { page = 1, persistRaw = true } = options;
   const persistRawPage = Boolean(persistRaw && Number(page) <= 1);
   const targetUrl = buildSgoPageUrl(config.baseUrl, normalizedPath, page);
   const { response, html, finalUrl, contentType, ms } = await fetchSgoHtml(
     targetUrl,
     config,
-    { modulePath: normalizedPath, page, persistRawPage, deadline },
+    { modulePath: normalizedPath, page, persistRawPage },
   );
-
   const rows = extractFromHtml(html).filter(isCleanJamaahRow);
   const summary = extractPageSummary(html);
   const pageOk = html.length > 500;
   const fetchedAt = new Date().toISOString();
 
-  // Persistensikan HTML asli hanya untuk halaman pertama lima modul yang
-  // diminta. Halaman pagination berikutnya tidak menimpa raw page 1.
   if (persistRawPage && isPersistedSgoModule(normalizedPath)) {
     saveSgoRawResponse({
       modulePath: normalizedPath,
@@ -1850,242 +1627,6 @@ export async function fetchSgoModule(modulePath, config, options = {}) {
   };
 }
 
-/**
- * Ambil modul sumber jamaah dari halaman 1 sampai halaman terakhir.
- *
- * Halaman 1 memakai URL asli (tanpa `page`) agar perilaku dan raw response
- * tetap sama. Halaman 2+ diminta berurutan dengan jeda `SGO_PAGINATION_DELAY_MS`.
- * Loop berhenti saat halaman kosong, HTML/baris berulang, atau error. Semua
- * baris digabung dan di-dedupe.
- */
-export async function fetchSgoModulePaginated(modulePath, config, options = {}) {
-  const normalizedPath = normalizeModulePath(modulePath);
-  const { persistRaw = true, deadline = null } = options;
-  const startPage = Math.max(1, Math.trunc(Number(options.startPage) || 1));
-  const requestedMax = Number(options.maxPages);
-  const batchMax =
-    Number.isFinite(requestedMax) && requestedMax > 0
-      ? Math.trunc(requestedMax)
-      : UNBOUNDED_PAGES;
-  const started = Date.now();
-  console.log(`[SGO] Scraping page ${startPage}... (${normalizedPath})`);
-  const firstPage = await fetchSgoModule(normalizedPath, config, {
-    page: startPage,
-    persistRaw: persistRaw && startPage === 1,
-    deadline,
-  });
-  firstPage.pageInfo = extractUploadPageInfo(firstPage.html || '');
-
-  const moduleLabel = getSgoModuleMeta(normalizedPath)?.label || normalizedPath;
-  updateSyncProgress({
-    phase: 'pages',
-    percent: syncPercentFromPages(1, 0, { start: 5, end: 30 }),
-    message: `Mengambil ${moduleLabel} halaman ${startPage}...`,
-    detail: `${firstPage.rows.length.toLocaleString('id-ID')} baris pada halaman ${startPage}`,
-    pagesFetched: 1,
-    rows: firstPage.rows.length,
-  });
-
-  const pagination = {
-    enabled: PAGINATION_ENABLED,
-    pageParam: PAGINATION_PAGE_PARAM,
-    delayMs: PAGINATION_DELAY_MS,
-    startPage,
-    maxPages: batchMax,
-    pagesFetched: 1,
-    pagesWithRows: firstPage.rows.length ? 1 : 0,
-    rowsOnFirstPage: firstPage.rows.length,
-    rows: 0,
-    totalJamaahReported: 0,
-    totalPagesReported: 0,
-    stopReason: 'single-page',
-    hasMore: false,
-    nextPage: null,
-    errors: [],
-    ms: 0,
-  };
-
-  const seenKeys = new Set();
-  const seenHashes = new Set([firstPage.htmlHash]);
-  const combinedRows = [];
-
-  const addPageRows = (rows = []) => {
-    let added = 0;
-    for (const row of rows) {
-      const key = jamaahRowKey(row);
-      if (!key.replace(/\|/g, '').trim()) continue;
-      if (seenKeys.has(key)) continue;
-      seenKeys.add(key);
-      combinedRows.push(row);
-      added += 1;
-    }
-    return added;
-  };
-
-  addPageRows(firstPage.rows);
-  pagination.totalJamaahReported = Number(firstPage.pageInfo?.totalJamaah) || 0;
-  pagination.totalPagesReported = Number(firstPage.pageInfo?.totalPages) || 0;
-
-  const finish = (stopReason) => {
-    pagination.stopReason = stopReason;
-    pagination.rows = combinedRows.length;
-    pagination.ms = Date.now() - started;
-    return pagination;
-  };
-
-  if (!PAGINATION_ENABLED) {
-    return { ...firstPage, rows: combinedRows, pagination: finish('disabled') };
-  }
-
-  if (batchMax <= 1) {
-    const hasRows = Boolean(firstPage.pageOk && firstPage.rows.length);
-    return {
-      ...firstPage,
-      rows: combinedRows,
-      pagination: {
-        ...finish(hasRows ? 'max-pages' : 'empty-page'),
-        hasMore: hasRows,
-        nextPage: hasRows ? startPage + 1 : null,
-      },
-    };
-  }
-
-  if (!firstPage.rows.length) {
-    return {
-      ...firstPage,
-      rows: combinedRows,
-      pagination: finish('page-1-empty'),
-    };
-  }
-
-  let lastPage = firstPage;
-  let stopReason = 'max-pages';
-  let page = startPage + 1;
-  const lastPageLimit = startPage + batchMax - 1;
-
-  while (page <= lastPageLimit) {
-    if (budgetExhausted(deadline)) {
-      stopReason = 'deadline';
-      break;
-    }
-    if (
-      PAGINATION_DELAY_MS > 0 &&
-      remainingBudgetMs(deadline) <= PAGINATION_DELAY_MS + BUDGET_STOP_WINDOW_MS
-    ) {
-      stopReason = 'deadline';
-      break;
-    }
-    if (PAGINATION_DELAY_MS > 0) await delay(PAGINATION_DELAY_MS);
-    console.log(`[SGO] Scraping page ${page}... (${normalizedPath})`);
-
-    let currentPage;
-    try {
-      currentPage = await fetchSgoModule(normalizedPath, config, {
-        page,
-        persistRaw: false,
-        deadline,
-      });
-    } catch (error) {
-      stopReason = error?.code === 'SGO_AUTH' ? 'auth-error' : 'fetch-error';
-      pagination.errors.push({
-        page,
-        code: error?.code || 'SGO_ERROR',
-        status: error?.status || 0,
-        message: error?.message || String(error),
-      });
-      console.warn(
-        `[SGO Pagination] ${normalizedPath} halaman ${page} gagal ` +
-          `(${error?.code || 'SGO_ERROR'}): ${error?.message || error}`,
-      );
-      break;
-    }
-
-    pagination.pagesFetched += 1;
-    lastPage = currentPage;
-    currentPage.pageInfo = extractUploadPageInfo(currentPage.html || '');
-    pagination.totalJamaahReported =
-      currentPage.pageInfo.totalJamaah || pagination.totalJamaahReported;
-    pagination.totalPagesReported =
-      currentPage.pageInfo.totalPages || pagination.totalPagesReported;
-
-    if (!currentPage.pageOk) {
-      stopReason = 'page-not-ok';
-      break;
-    }
-
-    // Server yang mengabaikan parameter `page` akan mengembalikan HTML identik.
-    const reportedPage = Number(currentPage.pageInfo?.currentPage) || 0;
-    if (reportedPage > 0 && reportedPage !== page) {
-      stopReason = 'pagination-ignored';
-      break;
-    }
-    if (seenHashes.has(currentPage.htmlHash)) {
-      stopReason = 'duplicate-page';
-      break;
-    }
-    seenHashes.add(currentPage.htmlHash);
-
-    if (!currentPage.rows.length) {
-      stopReason = 'empty-page';
-      break;
-    }
-
-    pagination.pagesWithRows += 1;
-    const added = addPageRows(currentPage.rows);
-    updateSyncProgress({
-      phase: 'pages',
-      percent: syncPercentFromPages(pagination.pagesFetched, 0, {
-        start: 5,
-        end: 30,
-      }),
-      message: `Mengambil ${moduleLabel} halaman ${page}...`,
-      detail: `${combinedRows.length.toLocaleString('id-ID')} jamaah terkumpul`,
-      pagesFetched: pagination.pagesFetched,
-      rows: combinedRows.length,
-    });
-    if (added === 0) {
-      stopReason = 'no-new-rows';
-      break;
-    }
-
-    console.log(
-      `[SGO Pagination] ${normalizedPath} halaman ${page}: +${added} jamaah baru ` +
-        `(total ${combinedRows.length}).`,
-    );
-    page += 1;
-  }
-
-  if (budgetExhausted(deadline, 0) && stopReason !== 'auth-error') {
-    stopReason = 'deadline';
-  }
-  const stats = finish(stopReason);
-  const nextByKnownTotal =
-    stats.totalPagesReported > 0 && page < stats.totalPagesReported ? page : null;
-  const nextByProbe =
-    stats.totalPagesReported <= 0 && ['max-pages', 'deadline'].includes(stats.stopReason)
-      ? page
-      : null;
-  stats.nextPage = nextByKnownTotal || nextByProbe;
-  stats.hasMore = Boolean(stats.nextPage);
-  console.log(
-    `[SGO Pagination] ${normalizedPath}: ${stats.pagesFetched} halaman diminta, ` +
-      `${stats.pagesWithRows} berisi data, ${stats.rows} jamaah unik ` +
-      `(${stats.ms}ms, stop=${stats.stopReason}, hasMore=${stats.hasMore}).`,
-  );
-
-  return {
-    ...firstPage,
-    finalUrl: lastPage.finalUrl,
-    fetchedAt: lastPage.fetchedAt,
-    rows: combinedRows,
-    pagination: stats,
-    ms: Date.now() - started,
-  };
-}
-
-/**
- * Ambil satu halaman Upload Manifest dan parsing baris jamaahnya.
- */
 export async function fetchUploadDocumentsPage(config, page = 1, options = {}) {
   const pageNumber = Math.max(1, Math.trunc(Number(page) || 1));
   const targetUrl = buildUploadDocumentsUrl(
@@ -2101,7 +1642,6 @@ export async function fetchUploadDocumentsPage(config, page = 1, options = {}) {
       modulePath: UPLOAD_DOCUMENTS_PATH,
       page: pageNumber,
       persistRawPage,
-      deadline: options.deadline || null,
     },
   );
 
@@ -2145,495 +1685,42 @@ export async function fetchUploadDocumentsPage(config, page = 1, options = {}) {
   };
 }
 
-/**
- * Full multi-page auto-pagination untuk Upload Manifest.
- *
- * Ketahanan:
- * - retry/backoff per request ditangani `fetchSgoHtml` (HTTP 500/502/503/504/429/timeout),
- * - halaman yang tetap gagal dicatat lalu dilewati, bukan menghentikan seluruh siklus,
- * - setelah loop utama, halaman yang gagal dicoba ulang (recovery pass),
- * - loop berhenti saat halaman terakhir yang dilaporkan SGO tercapai, bukan saat satu
- *   request kebetulan gagal.
- */
-export async function fetchUploadDocumentsPaginated(config, options = {}) {
-  const started = Date.now();
-  const deadline = options.deadline || null;
-  const startPage = Math.max(1, Math.trunc(Number(options.startPage) || 1));
-  const requestedMax = Number(options.maxPages);
-  const maxPages =
-    Number.isFinite(requestedMax) && requestedMax > 0
-      ? Math.trunc(requestedMax)
-      : UNBOUNDED_PAGES;
-  const effectiveMaxPages = PAGINATION_ENABLED ? maxPages : 1;
-  const search = String(options.search || '').trim() || UPLOAD_DOCUMENTS_SEARCH;
-  const stats = {
-    enabled: PAGINATION_ENABLED,
-    mode: 'upload-documents',
-    search,
-    pageParam: PAGINATION_PAGE_PARAM,
-    delayMs: PAGINATION_DELAY_MS,
-    startPage,
-    maxPages: effectiveMaxPages,
-    retryAttempts: SGO_HTTP_RETRY_ATTEMPTS,
-    retryBaseMs: SGO_HTTP_RETRY_BASE_MS,
-    failureCooldownMs: SGO_PAGE_FAILURE_COOLDOWN_MS,
-    pagesFetched: 0,
-    pagesWithRows: 0,
-    rowsOnFirstPage: 0,
-    rows: 0,
-    totalJamaahReported: 0,
-    totalPagesReported: 0,
-    failedPages: [],
-    recoveredPages: 0,
-    unrecoveredPages: [],
-    stopReason: 'max-pages',
-    hasMore: false,
-    nextPage: null,
-    deadlineMs: Number(deadline?.totalMs) || 0,
-    deadlineReached: false,
-    errors: [],
-    ms: 0,
-  };
-
-  const combined = [];
-  const seen = new Set();
-  const seenHashes = new Set();
-  let firstPage = null;
-  let lastPage = null;
-  let page = startPage;
-  let stopReason = 'max-pages';
-  let consecutiveFailures = 0;
-
-  const ingestPage = (current) => {
-    let added = 0;
-    for (const row of current.rows) {
-      const identity = cleanCell(row.manifestId)
-        ? `m:${row.manifestId}`
-        : jamaahRowKey(row);
-      if (!identity.replace(/\|/g, '').trim()) continue;
-      if (seen.has(identity)) continue;
-      seen.add(identity);
-      combined.push(row);
-      added += 1;
-    }
-    stats.rows = combined.length;
-    return added;
-  };
-
-  const recordFailure = (pageNumber, error, phase = 'pagination') => {
-    stats.errors.push({
-      page: pageNumber,
-      phase,
-      code: error?.code || 'SGO_ERROR',
-      status: error?.status || 0,
-      message: error?.message || String(error),
-    });
-  };
-
-  const noteFailedPage = (pageNumber) => {
-    if (!stats.failedPages.includes(pageNumber)) {
-      stats.failedPages.push(pageNumber);
-    }
-  };
-
-  const waitWithinBudget = async (ms) => {
-    const waitMs = Math.max(0, Number(ms) || 0);
-    if (!waitMs) return true;
-    if (remainingBudgetMs(deadline) <= waitMs + BUDGET_STOP_WINDOW_MS) return false;
-    await delay(waitMs);
-    return true;
-  };
-
-  const markDeadline = () => {
-    stats.deadlineReached = true;
-    stopReason = combined.length ? 'deadline' : 'deadline-empty';
-    updateSyncProgress({
-      phase: 'deadline',
-      percent: combined.length ? 79 : 100,
-      message: combined.length
-        ? 'Batas waktu sinkronisasi tercapai, menyimpan data yang sudah terkumpul...'
-        : 'Batas waktu sinkronisasi tercapai sebelum data berhasil dikumpulkan.',
-      detail: `${combined.length.toLocaleString('id-ID')} jamaah terkumpul sebelum batas waktu`,
-      pagesFetched: stats.pagesFetched,
-      totalPages: stats.totalPagesReported,
-      rows: combined.length,
-    });
-  };
-
-  // Kirim baris per halaman ke pemanggil (server) agar cache SQLite bisa
-  // diperbarui saat sinkronisasi masih berjalan. Kegagalan callback tidak
-  // boleh menghentikan pagination utama.
-  const notifyPageRows = (current, added = 0) => {
-    if (typeof options.onPageRows !== 'function') return;
-
-    try {
-      const result = options.onPageRows({
-        rows: Array.isArray(current?.rows) ? current.rows : [],
-        page: Number(current?.page || 0),
-        added: Number(added) || 0,
-        pagesFetched: Number(stats.pagesFetched) || 0,
-        totalPages: Number(stats.totalPagesReported) || 0,
-        totalRows: combined.length,
-      });
-      if (result && typeof result.catch === 'function') {
-        result.catch((error) => {
-          console.warn(
-            `[SGO Upload] Callback halaman ${current?.page || '?'} gagal: ${error.message}`,
-          );
-        });
-      }
-    } catch (error) {
-      console.warn(
-        `[SGO Upload] Callback halaman ${current?.page || '?'} gagal: ${error.message}`,
-      );
-    }
-  };
-
-  const lastPageLimit = startPage + effectiveMaxPages - 1;
-  while (page <= lastPageLimit) {
-    if (budgetExhausted(deadline)) {
-      markDeadline();
-      break;
-    }
-    if (page > startPage && !(await waitWithinBudget(PAGINATION_DELAY_MS))) {
-      markDeadline();
-      break;
-    }
-    const searchLabel = search ? `?search=${search}` : '';
-    console.log(
-      `[SGO] Scraping page ${page}... (${UPLOAD_DOCUMENTS_PATH}${searchLabel})`,
-    );
-
-    let current;
-    try {
-      current = await fetchUploadDocumentsPage(config, page, {
-        persistRaw: options.persistRaw !== false,
-        search,
-        deadline,
-      });
-    } catch (error) {
-      recordFailure(page, error, 'pagination');
-      console.warn(
-        `[SGO Upload] Halaman ${page} gagal ` +
-          `(${error?.code || 'SGO_ERROR'}): ${error?.message || error}. ` +
-          `Melanjutkan ke halaman berikutnya...`,
-      );
-
-      if (error?.code === 'SGO_AUTH') {
-        stopReason = 'auth-error';
-        break;
-      }
-      if (error?.code === 'SGO_DEADLINE' || budgetExhausted(deadline)) {
-        noteFailedPage(page);
-        markDeadline();
-        break;
-      }
-
-      noteFailedPage(page);
-      consecutiveFailures += 1;
-
-      if (consecutiveFailures >= SGO_MAX_CONSECUTIVE_PAGE_FAILURES) {
-        stopReason = 'fetch-error';
-        console.error(
-          `[SGO Upload] ${consecutiveFailures} halaman berturut-turut gagal; ` +
-            `siklus dijeda agar server SGO tidak dibanjiri.`,
-        );
-        break;
-      }
-
-      if (stats.totalPagesReported && page >= stats.totalPagesReported) {
-        stopReason = 'last-page';
-        break;
-      }
-
-      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
-        noteFailedPage(page);
-        markDeadline();
-        break;
-      }
-      page += 1;
-      continue;
-    }
-
-    consecutiveFailures = 0;
-    if (!firstPage) firstPage = current;
-    lastPage = current;
-    stats.pagesFetched += 1;
-    stats.totalJamaahReported =
-      current.pageInfo.totalJamaah || stats.totalJamaahReported;
-    stats.totalPagesReported =
-      current.pageInfo.totalPages || stats.totalPagesReported;
-
-    if (!current.pageOk) {
-      recordFailure(
-        page,
-        buildError(
-          `Halaman ${page} tidak valid (${current.htmlLength} byte).`,
-          'SGO_PAGE_INVALID',
-        ),
-        'pagination',
-      );
-      noteFailedPage(page);
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= SGO_MAX_CONSECUTIVE_PAGE_FAILURES) {
-        stopReason = 'page-not-ok';
-        break;
-      }
-      if (stats.totalPagesReported && page >= stats.totalPagesReported) {
-        stopReason = 'last-page';
-        break;
-      }
-      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
-        markDeadline();
-        break;
-      }
-      page += 1;
-      continue;
-    }
-
-    if (page > startPage && current.pageInfo.currentPage === startPage && startPage === 1) {
-      stopReason = 'pagination-ignored';
-      break;
-    }
-
-    // Server yang mengabaikan parameter `page` akan mengembalikan HTML identik.
-    // Jangan langsung menghentikan seluruh scrape; catat lalu lanjutkan.
-    if (seenHashes.has(current.htmlHash)) {
-      recordFailure(
-        page,
-        buildError(
-          `Halaman ${page} mengulang HTML halaman sebelumnya.`,
-          'SGO_DUPLICATE_PAGE',
-        ),
-        'pagination',
-      );
-      noteFailedPage(page);
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= SGO_MAX_CONSECUTIVE_PAGE_FAILURES) {
-        stopReason = 'duplicate-page';
-        break;
-      }
-      if (stats.totalPagesReported && page >= stats.totalPagesReported) {
-        stopReason = 'last-page';
-        break;
-      }
-      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
-        markDeadline();
-        break;
-      }
-      page += 1;
-      continue;
-    }
-    seenHashes.add(current.htmlHash);
-
-    if (!current.rows.length) {
-      const expectedMore =
-        stats.totalPagesReported && page < stats.totalPagesReported;
-
-      // Halaman kosong di tengah pagination biasanya respons transien SGO.
-      // Catat sebagai gap dan lanjut ke halaman berikutnya.
-      if (expectedMore) {
-        recordFailure(
-          page,
-          buildError(
-            `Halaman ${page} kosong padahal SGO melaporkan ${stats.totalPagesReported} halaman.`,
-            'SGO_EMPTY_PAGE',
-          ),
-          'pagination',
-        );
-        noteFailedPage(page);
-        consecutiveFailures += 1;
-        if (consecutiveFailures >= SGO_MAX_CONSECUTIVE_PAGE_FAILURES) {
-          stopReason = 'empty-page';
-          break;
-        }
-        if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
-          markDeadline();
-          break;
-        }
-        page += 1;
-        continue;
-      }
-
-      stopReason = current.pageInfo.hasEmptyState ? 'no-results' : 'empty-page';
-      break;
-    }
-
-    stats.pagesWithRows += 1;
-    if (page === startPage) stats.rowsOnFirstPage = current.rows.length;
-
-    const added = ingestPage(current);
-    notifyPageRows(current, added);
-    updateSyncProgress({
-      phase: 'upload-pages',
-      percent: syncPercentFromPages(
-        page,
-        stats.totalPagesReported,
-        { start: 6, end: 80 },
-      ),
-      message: `Mengambil Upload Manifest halaman ${page}${
-        stats.totalPagesReported ? ` dari ${stats.totalPagesReported}` : ''
-      }...`,
-      detail:
-        `${combined.length.toLocaleString('id-ID')} jamaah terkumpul` +
-        (stats.totalJamaahReported
-          ? ` • ${stats.totalJamaahReported.toLocaleString('id-ID')} total di SGO`
-          : ''),
-      pagesFetched: stats.pagesFetched,
-      totalPages: stats.totalPagesReported,
-      rows: combined.length,
-    });
-    console.log(
-      `[SGO] Scraping page ${page} selesai: +${added} jamaah ` +
-        `(total ${combined.length}).`,
-    );
-
-    if (stats.totalPagesReported && page >= stats.totalPagesReported) {
-      stopReason = 'last-page';
-      break;
-    }
-
-    // Jika SGO melaporkan masih ada halaman berikutnya, teruskan meskipun
-    // tautan "Berikutnya" tidak terdeteksi pada HTML halaman ini.
-    if (
-      !current.pageInfo.hasNext &&
-      !(stats.totalPagesReported && page < stats.totalPagesReported)
-    ) {
-      stopReason = 'no-next-page';
-      break;
-    }
-
-    page += 1;
-  }
-
-  // Recovery pass: halaman yang gagal di loop utama dicoba ulang setelah jeda.
-  // Baris yang berhasil dipulihkan digabung tanpa duplikasi.
-  if (
-    stopReason !== 'auth-error' &&
-    !budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS) &&
-    stats.failedPages.length
-  ) {
-    for (const failedPage of [...stats.failedPages]) {
-      if (budgetExhausted(deadline, REQUEST_DEADLINE_RESERVE_MS)) {
-        stats.deadlineReached = true;
-        break;
-      }
-      if (!(await waitWithinBudget(SGO_PAGE_FAILURE_COOLDOWN_MS))) {
-        stats.deadlineReached = true;
-        break;
-      }
-      console.log(`[SGO Upload] Recovery halaman ${failedPage}...`);
-
-      try {
-        const recovered = await fetchUploadDocumentsPage(config, failedPage, {
-          persistRaw: false,
-          search,
-          deadline,
-        });
-
-        if (!recovered.pageOk) {
-          throw buildError(
-            `Halaman recovery ${failedPage} tidak valid.`,
-            'SGO_PAGE_INVALID',
-          );
-        }
-        if (!recovered.rows.length) {
-          throw buildError(
-            `Halaman recovery ${failedPage} tidak berisi data.`,
-            'SGO_EMPTY_PAGE',
-          );
-        }
-
-        stats.pagesFetched += 1;
-        stats.pagesWithRows += 1;
-        stats.recoveredPages += 1;
-        stats.totalJamaahReported =
-          recovered.pageInfo.totalJamaah || stats.totalJamaahReported;
-        stats.totalPagesReported =
-          recovered.pageInfo.totalPages || stats.totalPagesReported;
-
-        const added = ingestPage(recovered);
-        notifyPageRows(recovered, added);
-        if (!firstPage) firstPage = recovered;
-        if (!lastPage || recovered.page >= lastPage.page) lastPage = recovered;
-
-        console.log(
-          `[SGO Upload] Recovery halaman ${failedPage} berhasil: ` +
-            `+${added} jamaah (total ${combined.length}).`,
-        );
-      } catch (error) {
-        if (!stats.unrecoveredPages.includes(failedPage)) {
-          stats.unrecoveredPages.push(failedPage);
-        }
-        recordFailure(failedPage, error, 'recovery');
-        console.warn(
-          `[SGO Upload] Recovery halaman ${failedPage} gagal ` +
-            `(${error?.code || 'SGO_ERROR'}): ${error?.message || error}`,
-        );
-        if (error?.code === 'SGO_AUTH') {
-          stopReason = 'auth-error';
-          break;
-        }
-        if (error?.code === 'SGO_DEADLINE' || budgetExhausted(deadline)) {
-          stats.deadlineReached = true;
-          break;
-        }
-      }
-    }
-  }
-
-  if (stats.unrecoveredPages.length && stopReason !== 'auth-error') {
-    stopReason = 'completed-with-gaps';
-  } else if (
-    stats.recoveredPages > 0 &&
-    !stats.unrecoveredPages.length &&
-    stopReason === 'fetch-error'
-  ) {
-    stopReason = 'recovered';
-  }
-  if (budgetExhausted(deadline, 0) && stopReason !== 'auth-error') {
-    stats.deadlineReached = true;
-    stopReason = combined.length ? 'deadline' : 'deadline-empty';
-  }
-
-  const nextByKnownTotal =
-    stats.totalPagesReported > 0 && page < stats.totalPagesReported ? page : null;
-  const nextByProbe =
-    stats.totalPagesReported <= 0 && ['max-pages', 'deadline', 'completed-with-gaps'].includes(stopReason)
-      ? page
-      : null;
-  stats.nextPage = nextByKnownTotal || nextByProbe;
-  stats.hasMore = Boolean(stats.nextPage);
-  stats.stopReason = stopReason;
-  stats.rows = combined.length;
-  stats.ms = Date.now() - started;
-  console.log(
-    `[SGO Upload] Selesai: ${stats.pagesFetched} halaman, ` +
-      `${stats.rows} jamaah unik, ${stats.recoveredPages} halaman dipulihkan, ` +
-      `${stats.unrecoveredPages.length} gap, stop=${stats.stopReason}, ${stats.ms}ms.`,
-  );
-
-  console.log(
-    `[SGO] Selesai: ${combined.length} jamaah dari ${stats.pagesFetched} halaman ` +
-      `(${stats.ms}ms, stop=${stats.stopReason}, recovered=${stats.recoveredPages}, ` +
-      `unrecovered=${stats.unrecoveredPages.length}, deadline=${stats.deadlineReached ? 'yes' : 'no'}).`,
+function buildUploadPaginationStats(pages = [], errors = []) {
+  const list = Array.isArray(pages) ? pages.filter(Boolean) : [];
+  const first = list.find((entry) => entry.page === 1) || list[0] || null;
+  const totalPagesReported = Math.max(
+    1,
+    Number(first?.pageInfo?.totalPages) || list.length || 1,
   );
   return {
+    enabled: true,
+    mode: 'upload-documents',
     modulePath: UPLOAD_DOCUMENTS_PATH,
-    page: lastPage?.page || 1,
-    targetUrl:
-      lastPage?.targetUrl || buildUploadDocumentsUrl(config.baseUrl, 1, search),
-    finalUrl: lastPage?.finalUrl || '',
-    status: lastPage?.status || 0,
-    contentType: lastPage?.contentType || 'text/html',
-    fetchedAt: lastPage?.fetchedAt || new Date().toISOString(),
-    htmlLength: lastPage?.htmlLength || 0,
-    htmlHash: lastPage?.htmlHash || '',
-    pageOk: Boolean(firstPage?.pageOk),
-    rows: combined,
-    summary: firstPage?.summary || null,
-    pagination: stats,
-    ms: Date.now() - started,
+    search: UPLOAD_DOCUMENTS_SEARCH,
+    pageParam: PAGINATION_PAGE_PARAM,
+    startPage: 1,
+    maxPages: totalPagesReported,
+    retryAttempts: SGO_HTTP_RETRY_ATTEMPTS,
+    retryBaseMs: SGO_HTTP_RETRY_BASE_MS,
+    failureCooldownMs: 0,
+    pagesFetched: list.length,
+    pagesWithRows: list.filter((entry) => entry.rows.length > 0).length,
+    rowsOnFirstPage: Number(first?.rows?.length) || 0,
+    rows: list.reduce((total, entry) => total + Number(entry?.rows?.length || 0), 0),
+    totalJamaahReported: Number(first?.pageInfo?.totalJamaah) || 0,
+    totalPagesReported,
+    failedPages: errors
+      .filter((entry) => entry.page > 0)
+      .map((entry) => entry.page),
+    recoveredPages: 0,
+    unrecoveredPages: errors
+      .filter((entry) => entry.page > 0)
+      .map((entry) => entry.page),
+    stopReason: errors.length ? 'completed-with-gaps' : 'completed',
+    hasMore: false,
+    nextPage: null,
+    errors,
+    ms: 0,
   };
 }
 
@@ -2647,11 +1734,6 @@ function normalizeLookup(value = '') {
     .replace(/\s+/g, ' ');
 }
 
-/**
- * Pilih baris SGO yang paling mungkin merupakan jamaah target.
- * Prioritas: manifestId persis, kode order (+nama), nama persis, lalu
- * pencocokan sebagian pada nama/kode order.
- */
 export function pickJamaahMatch(rows = [], hints = {}) {
   const manifestId = cleanCell(hints.manifestId || hints.jamaahId);
   const order = normalizeLookup(
@@ -2659,9 +1741,9 @@ export function pickJamaahMatch(rows = [], hints = {}) {
   );
   const name = normalizeLookup(hints.nama || hints.name || '');
   const query = normalizeLookup(hints.query || '');
-
   let best = null;
   let bestScore = 0;
+
   for (const row of Array.isArray(rows) ? rows : []) {
     const rowId = cleanCell(row.manifestId || row.jamaahId);
     const rowOrder = normalizeLookup(
@@ -2669,14 +1751,12 @@ export function pickJamaahMatch(rows = [], hints = {}) {
     );
     const rowName = normalizeLookup(row.nama || row.name || '');
     let score = 0;
-
     if (manifestId && rowId === manifestId) score = 100;
     else if (order && rowOrder === order) {
       score = name && rowName === name ? 95 : 85;
     } else if (name && rowName === name) score = 70;
     else if (query && rowName.includes(query)) score = 50;
     else if (query && rowOrder.includes(query)) score = 40;
-
     if (score > bestScore) {
       best = row;
       bestScore = score;
@@ -2686,10 +1766,6 @@ export function pickJamaahMatch(rows = [], hints = {}) {
   return { row: best, score: bestScore };
 }
 
-/**
- * Sinkronisasi satu jamaah: cari lewat Upload Manifest SGO memakai kata kunci
- * nama/kode order, lalu kembalikan baris yang cocok beserta data dokumennya.
- */
 export async function fetchSingleJamaahFromSgo({
   url,
   cookie,
@@ -2714,213 +1790,225 @@ export async function fetchSingleJamaahFromSgo({
     );
   }
 
-  const result = await fetchUploadDocumentsPaginated(config, {
-    search: keyword,
-    maxPages,
-    persistRaw: false,
-  });
-  const match = pickJamaahMatch(result.rows, { ...hints, query: keyword });
+  const pageCount = Math.max(1, Math.min(Math.trunc(Number(maxPages) || 3), 10));
+  const pages = await mapWithConcurrency(
+    Array.from({ length: pageCount }, (_, index) => index + 1),
+    Math.min(pageCount, 3),
+    async (page) => fetchUploadDocumentsPage(config, page, {
+      search: keyword,
+      persistRaw: false,
+    }),
+  );
+  const rows = mergeJamaahRows(pages.flatMap((entry) => entry?.rows || []));
+  const match = pickJamaahMatch(rows, { ...hints, query: keyword });
 
   return {
     config,
     keyword,
     match: match.row,
     score: match.score,
-    rows: result.rows,
-    pagination: result.pagination,
-    page: result,
-  };
-}
-
-/**
- * Jalankan satu putaran fetch paralel memakai satu config cookie.
- * Tidak pernah throw untuk kegagalan modul; semua error dikumpulkan di
- * `errors` agar pemanggil bisa memutuskan fallback.
- */
-async function runSgoAttempt({ config, modulePaths, onUploadPage, deadline, startPage, batchPages }) {
-  const settled = await Promise.allSettled(
-    modulePaths.map((modulePath) => {
-      const normalizedPath = normalizeModulePath(modulePath);
-      if (normalizedPath === UPLOAD_DOCUMENTS_PATH) {
-        return fetchUploadDocumentsPaginated(config, {
-          onPageRows:
-            typeof onUploadPage === 'function' ? onUploadPage : undefined,
-          deadline,
-          startPage,
-          maxPages: batchPages,
-        });
-      }
-      return isJamaahModule(normalizedPath)
-        ? fetchSgoModulePaginated(normalizedPath, config, { deadline, startPage, maxPages: batchPages })
-        : fetchSgoModule(normalizedPath, config, { deadline });
-    }),
-  );
-
-  const pages = [];
-  const errors = [];
-  let authError = null;
-
-  settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      pages.push(result.value);
-      return;
-    }
-
-    const reason = result.reason || {};
-    const info = {
-      modulePath: modulePaths[index],
-      code: reason.code || 'SGO_ERROR',
-      status: reason.status || 0,
-      message: reason.message || String(reason),
-    };
-    errors.push(info);
-    if (info.code === 'SGO_AUTH' && !authError) authError = reason;
-    console.error(`[SGO] ${info.modulePath} gagal (${info.code}${info.status ? ` ${info.status}` : ''}): ${info.message}`);
-  });
-
-  for (const page of pages) {
-    if (!page.pageOk) {
-      console.error(`[SGO] ${page.modulePath} mengembalikan halaman kosong (${page.htmlLength} byte).`);
-    } else if (!page.rows.length) {
-      console.warn(`[SGO] ${page.modulePath} OK (${page.htmlLength} byte) tetapi tidak ada baris jamaah.`);
-    }
-  }
-
-  // Hanya modul sumber jamaah (Monitoring Jamaah + Upload Manifest) yang
-  // boleh mengisi store. Baris digabung agar RTB/pembayaran dari Monitoring
-  // melengkapi NIK/paspor/status dokumen dari Upload Manifest.
-  const jamaahSourcePaths = new Set(
-    SGO_MODULE_OPTIONS.filter((module) => module.jamaahSource).map(
-      (module) => module.path,
-    ),
-  );
-  const rows = mergeJamaahRows(
-    pages
-      .filter((page) => jamaahSourcePaths.has(page.modulePath))
-      .flatMap((page) => page.rows),
-  );
-  const modulesVisited = pages.filter((page) => page.pageOk).map((page) => page.modulePath);
-  const failedSet = new Set([
-    ...errors.map((error) => error.modulePath),
-    ...pages.filter((page) => !page.pageOk).map((page) => page.modulePath),
-  ]);
-
-  console.log(
-    `[SGO] Hasil: ${rows.length} jamaah bersih | ${modulesVisited.length}/${modulePaths.length} modul OK | ${errors.length} error`,
-  );
-
-  return {
     rows,
+    pagination: buildUploadPaginationStats(pages, []),
     pages,
-    errors,
-    authError,
-    modulesVisited,
-    modulesFailed: [...failedSet],
-    pagination: pages
-      .filter((page) => page.pagination)
-      .map((page) => ({ modulePath: page.modulePath, ...page.pagination })),
-    summaries: pages
-      .filter((page) => page.pageOk && page.summary)
-      .map((page) => ({ modulePath: page.modulePath, ...page.summary })),
   };
 }
 
-/**
- * Scrape cepat (fetch paralel) untuk satu modul fokus atau seluruh 16 modul.
- *
- * Cookie diambil dari request perangkat (atau override eksplisit pada body).
- * Tidak ada fallback ke cookie .env agar sesi antar perangkat tidak tercampur.
- */
-export async function scrapeSgoModules({
+export async function scrapeSgoLocal({
   url,
   cookie,
   focusModule,
-  enrichManifest = false,
+  enrichManifest = true,
   onUploadPage,
-  deadline,
-  startPage = 1,
-  batchPages = DEFAULT_BATCH_PAGES,
+  onProgress,
 } = {}) {
-  const requestConfig = resolveSgoConfig({ url, cookie });
-  if (!requestConfig.ok) {
+  const config = resolveSgoConfig({ url, cookie });
+  if (!config.ok) {
     throw buildError(
-      requestConfig.urlError || requestConfig.cookieError,
-      requestConfig.cookieError ? 'SGO_COOKIE_MISSING' : 'SGO_CONFIG',
-      { config: requestConfig },
+      config.urlError || config.cookieError || 'Konfigurasi SGO tidak valid.',
+      config.cookieError ? 'SGO_COOKIE_MISSING' : 'SGO_CONFIG',
+      { config },
     );
   }
 
   const focus = resolveSgoModule(focusModule);
   const modulePaths = focus ? [focus] : [...SGO_MODULES];
-  // Modul jamaah selalu berpasangan: Monitoring memberi pembayaran/RTB,
-  // Upload Manifest memberi cakupan penuh lewat pagination.
   if (focus && isJamaahModule(focus)) {
     for (const required of [MONITORING_JAMAAH_PATH, UPLOAD_DOCUMENTS_PATH]) {
       if (!modulePaths.includes(required)) modulePaths.push(required);
     }
   }
 
-  const scrapeDeadline = deadline || createScrapeDeadline(SCRAPE_BUDGET_MS);
-  console.log(
-    `[SGO] Scrape ${focus ? `modul ${modulePaths.join(', ')}` : `${modulePaths.length} modul`} | cookie dari ${requestConfig.cookieSource} (${maskCookie(requestConfig.cookieHeader)}) | base ${requestConfig.baseUrl} | deadline ${Math.round(scrapeDeadline.totalMs / 1000)}s`,
+  const notify = typeof onProgress === 'function' ? onProgress : () => {};
+  const started = Date.now();
+  const usesUpload = modulePaths.includes(UPLOAD_DOCUMENTS_PATH);
+  const otherPaths = modulePaths.filter(
+    (modulePath) => modulePath !== UPLOAD_DOCUMENTS_PATH,
   );
 
-  updateSyncProgress({
+  notify({
     phase: 'fetching',
-    percent: 3,
+    percent: 2,
     message: focus
       ? `Mengambil data ${getSgoModuleMeta(focus)?.label || focus} dari SGO...`
-      : `Mengambil ${modulePaths.length} modul SGO...`,
-    detail: `Koneksi SGO Admin terhubung (budget ${Math.round(scrapeDeadline.totalMs / 1000)} detik, batch ${batchPages} halaman)`,
+      : 'Mengambil seluruh modul SGO dari SGO Admin...',
+    detail: `Satu sesi cookie dipakai untuk ${PAGE_CONCURRENCY} permintaan paralel`,
     modules: modulePaths,
   });
 
-  let config = requestConfig;
-  assertNotPastDeadline(scrapeDeadline, 'Sinkronisasi SGO');
-  let attempt = await runSgoAttempt({
-    config,
-    modulePaths,
-    onUploadPage,
-    deadline: scrapeDeadline,
-    startPage,
-    batchPages,
-  });
-  updateSyncProgress({
-    phase: 'merging',
-    percent: 81,
-    message: 'Menggabungkan data Monitoring Jamaah & Upload Manifest...',
-    detail: `${attempt.rows.length.toLocaleString('id-ID')} jamaah unik`,
-    rows: attempt.rows.length,
-  });
-  let usedEnvCookie = false;
-  let requestCookieError = '';
-
-  // Enrichment dijalankan sekali pada hasil final, supaya tidak ada request
-  // manifest ganda. Refresh Upload Manifest boleh melewati tahap ini karena
-  // hanya membutuhkan status dokumen/RTB.
-  if (
-    enrichManifest &&
-    attempt.rows.length > 0 &&
-    !budgetExhausted(scrapeDeadline, REQUEST_DEADLINE_RESERVE_MS)
-  ) {
-    const enriched = await enrichJamaahWithManifest(attempt.rows, config, {
-      deadline: scrapeDeadline,
-    });
-    attempt = {
-      ...attempt,
-      rows: enriched.rows,
-      manifestEnrichment: enriched.stats,
-    };
+  let firstUpload = null;
+  if (usesUpload) {
+    firstUpload = await fetchUploadDocumentsPage(config, 1, { persistRaw: true });
   }
+  const totalPages = Math.max(
+    1,
+    Number(firstUpload?.pageInfo?.totalPages) || 1,
+  );
+  const uploadTasks = usesUpload
+    ? Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => ({
+        kind: 'upload',
+        page: index + 2,
+      }))
+    : [];
+  const tasks = [
+    ...otherPaths.map((modulePath) => ({ kind: 'module', modulePath })),
+    ...uploadTasks,
+  ];
+  const taskCount = tasks.length + (firstUpload ? 1 : 0);
+  let completed = firstUpload ? 1 : 0;
+  const uploadPages = firstUpload ? [firstUpload] : [];
+  const moduleResults = [];
+  const modulesVisited = firstUpload?.pageOk ? [UPLOAD_DOCUMENTS_PATH] : [];
+  const modulesFailed = firstUpload?.pageOk ? [] : [UPLOAD_DOCUMENTS_PATH];
+  const errors = [];
+  let authError = null;
+
+  const reportProgress = () => {
+    const percent = 6 + (completed / Math.max(1, taskCount)) * 64;
+    notify({
+      phase: 'fetching',
+      percent,
+      message: `Mengambil halaman SGO ${completed}/${taskCount}...`,
+      detail: `${uploadPages.reduce(
+        (total, entry) => total + Number(entry?.rows?.length || 0),
+        0,
+      ).toLocaleString('id-ID')} baris terkumpul • ${PAGE_CONCURRENCY} paralel`,
+      pagesFetched: completed,
+      totalPages: usesUpload ? totalPages : 0,
+      rows: uploadPages.reduce(
+        (total, entry) => total + Number(entry?.rows?.length || 0),
+        0,
+      ),
+    });
+  };
+  reportProgress();
+
+  await mapWithConcurrency(tasks, PAGE_CONCURRENCY, async (task) => {
+    if (authError) {
+      completed += 1;
+      return;
+    }
+    try {
+      if (task.kind === 'module') {
+        const result = await fetchSgoModule(task.modulePath, config, {
+          persistRaw: true,
+        });
+        moduleResults.push(result);
+        if (result.pageOk) modulesVisited.push(task.modulePath);
+        else modulesFailed.push(task.modulePath);
+      } else {
+        const result = await fetchUploadDocumentsPage(config, task.page, {
+          persistRaw: false,
+        });
+        uploadPages.push(result);
+        if (result.pageOk) {
+          if (!modulesVisited.includes(UPLOAD_DOCUMENTS_PATH)) {
+            modulesVisited.push(UPLOAD_DOCUMENTS_PATH);
+          }
+          if (result.rows.length && typeof onUploadPage === 'function') {
+            await onUploadPage({
+              rows: result.rows,
+              page: result.page,
+              added: result.rows.length,
+              pagesFetched: completed,
+              totalPages,
+              totalRows: uploadPages.reduce(
+                (total, entry) => total + Number(entry?.rows?.length || 0),
+                0,
+              ),
+            });
+          }
+        }
+      }
+    } catch (error) {
+      errors.push({
+        modulePath: task.modulePath || UPLOAD_DOCUMENTS_PATH,
+        page: task.page || 0,
+        code: error?.code || 'SGO_ERROR',
+        status: Number(error?.status) || 0,
+        message: error?.message || String(error),
+      });
+      if (error?.code === 'SGO_AUTH') authError = error;
+      if (task.kind === 'module') modulesFailed.push(task.modulePath);
+    } finally {
+      completed += 1;
+      reportProgress();
+    }
+  });
+
+  if (authError) throw authError;
+
+  uploadPages.sort((left, right) => Number(left.page) - Number(right.page));
+  const pagination = usesUpload
+    ? [buildUploadPaginationStats(uploadPages, errors)]
+    : [];
+  let rows = mergeJamaahRows([
+    ...moduleResults.flatMap((entry) => entry?.rows || []),
+    ...uploadPages.flatMap((entry) => entry?.rows || []),
+  ]);
+
+  notify({
+    phase: 'merging',
+    percent: 72,
+    message: 'Menggabungkan data jamaah dari seluruh halaman...',
+    detail: `${rows.length.toLocaleString('id-ID')} jamaah unik`,
+    rows: rows.length,
+  });
+
+  let manifestEnrichment = null;
+  if (enrichManifest && rows.length > 0) {
+    const enriched = await enrichJamaahWithManifest(rows, config, {
+      concurrency: MANIFEST_CONCURRENCY,
+      updateProgress: (patch) => notify(patch),
+      log: true,
+    });
+    rows = enriched.rows;
+    manifestEnrichment = enriched.stats;
+    if (enriched.authError) throw enriched.authError;
+  }
+
+  notify({
+    phase: 'saving',
+    percent: 98,
+    message: 'Menyiapkan data untuk disimpan...',
+    detail: `${rows.length.toLocaleString('id-ID')} jamaah siap disimpan`,
+    rows: rows.length,
+  });
 
   return {
     config,
-    focus: focus || null,
+    focus,
     modulePaths,
-    usedEnvCookie,
-    requestCookieError,
-    deadlineMs: scrapeDeadline.totalMs,
-    ...attempt,
+    modulesVisited: [...new Set(modulesVisited)],
+    modulesFailed: [...new Set(modulesFailed)],
+    rows,
+    pagination,
+    manifestEnrichment,
+    errors,
+    stats: {
+      pagesFetched: completed,
+      totalPages: usesUpload ? totalPages : 0,
+      durationMs: Date.now() - started,
+    },
   };
 }
 
@@ -2994,162 +2082,6 @@ export async function verifySgoCookie({ url, cookie } = {}) {
         : `Tidak dapat menghubungi SGO: ${error.message || 'jaringan gagal'}.`,
       status: 0,
     };
-  }
-}
-
-/**
- * Fallback Puppeteer. Dipakai hanya jika fetch cepat tidak menghasilkan data.
- */
-export async function scrapeSgoWithBrowser({ url, cookie, focusModule } = {}) {
-  const config = resolveSgoConfig({ url, cookie });
-  if (!config.ok) {
-    throw buildError(config.urlError || config.cookieError, 'SGO_CONFIG', { config });
-  }
-
-  const focus = resolveSgoModule(focusModule);
-  const modulePaths = focus ? [focus] : [...SGO_MODULES];
-
-  let browser;
-  try {
-    let puppeteer;
-    try {
-      puppeteer = await loadPuppeteer();
-    } catch (error) {
-      throw buildError(
-        'Browser fallback Puppeteer tidak tersedia di environment ini. Pastikan Cookie SGO perangkat valid untuk sinkronisasi fetch.',
-        'SGO_BROWSER_UNAVAILABLE',
-        { cause: error?.message || String(error) },
-      );
-    }
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent(SGO_USER_AGENT);
-
-    // Header Cookie eksplisit untuk SETIAP request halaman & aset.
-    await page.setExtraHTTPHeaders({
-      Cookie: config.cookieHeader,
-      'Accept-Language': 'id-ID,id;q=0.9,en;q=0.8',
-    });
-
-    const cookies = config.cookieHeader
-      .split(';')
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf('=');
-        if (index < 0) return null;
-        return {
-          name: pair.slice(0, index).trim(),
-          value: pair.slice(index + 1).trim(),
-          domain: new URL(config.baseUrl).hostname,
-          path: '/',
-        };
-      })
-      .filter(Boolean);
-    if (cookies.length) await page.setCookie(...cookies).catch(() => {});
-
-    const rows = [];
-    const modulesVisited = [];
-    const modulesFailed = [];
-
-    for (const modulePath of modulePaths) {
-      const targetUrl = `${config.baseUrl}${modulePath}`;
-      const started = Date.now();
-      try {
-        const navigation = await page.goto(targetUrl, {
-          waitUntil: 'networkidle2',
-          timeout: 30000,
-        });
-        const status = navigation?.status?.() ?? null;
-        const finalUrl = page.url() || targetUrl;
-        const initialHtml = await page.content();
-
-        if (looksLikeLoginPage(initialHtml, finalUrl)) {
-          const authError = buildError(
-            `Cookie kedaluwarsa / sesi login habis saat mengakses ${modulePath}.`,
-            'SGO_AUTH',
-            { modulePath, status },
-          );
-          saveSgoRawError({
-            modulePath,
-            code: authError.code,
-            message: authError.message,
-            status,
-            targetUrl,
-            finalUrl,
-            ms: Date.now() - started,
-          });
-          throw authError;
-        }
-
-        await page.waitForSelector('table', { timeout: 10000 }).catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-
-        const html = await page.content();
-        const parsed = extractFromHtml(html).filter(isCleanJamaahRow);
-        const summary = extractPageSummary(html);
-        const pageOk = html.length > 500;
-        const fetchedAt = new Date().toISOString();
-
-        if (isPersistedSgoModule(modulePath)) {
-          saveSgoRawResponse({
-            modulePath,
-            targetUrl,
-            finalUrl,
-            status,
-            contentType:
-              navigation?.headers?.()?.['content-type'] || 'text/html',
-            html,
-            pageOk,
-            rowsCount: parsed.length,
-            summary,
-            fetchedAt,
-            ms: Date.now() - started,
-          });
-        }
-
-        if (parsed.length) {
-          rows.push(...parsed);
-          modulesVisited.push(modulePath);
-        } else if (pageOk) {
-          // Halaman berhasil dibuka tetapi tidak punya tabel jamaah. Ini bukan
-          // kegagalan koneksi; modul operasional tetap dianggap termuat.
-          modulesVisited.push(modulePath);
-        } else {
-          modulesFailed.push(modulePath);
-        }
-      } catch (error) {
-        if (error?.code === 'SGO_AUTH') {
-          error.modulesVisited = modulesVisited;
-          throw error;
-        }
-        saveSgoRawError({
-          modulePath,
-          code: error?.code || 'SGO_BROWSER',
-          message: error.message,
-          targetUrl,
-          ms: Date.now() - started,
-        });
-        console.error(`[SGO][Puppeteer] ${modulePath} gagal: ${error.message}`);
-        modulesFailed.push(modulePath);
-      }
-    }
-
-    const mergedRows = dedupeJamaahRows(rows);
-    const enriched = mergedRows.length
-      ? await enrichJamaahWithManifest(mergedRows, config)
-      : { rows: mergedRows, stats: null };
-    return {
-      rows: enriched.rows,
-      modulesVisited,
-      modulesFailed,
-      manifestEnrichment: enriched.stats,
-    };
-  } finally {
-    if (browser) await browser.close().catch(() => {});
   }
 }
 

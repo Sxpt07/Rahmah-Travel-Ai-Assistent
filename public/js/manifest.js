@@ -1505,20 +1505,12 @@
         const result = await window.SgoSync.runFullSync({
           panel: els.progress,
           button: els.refresh,
-          endpoint: '/api/jamaah/scrape-cookie',
-          validationEndpoint: '/api/jamaah/validate-manifest',
-          body: {
-            focusModule: '/ops/upload-documents',
-            skipManifest: true,
-            js: true,
-          },
-          validationBody: { js: true },
-          batchPages: 2,
+          endpoint: '/api/jamaah/full-sync',
+          body: { focusModule: '/ops/upload-documents', js: true },
           label: 'Upload Manifest',
           busyLabel: 'Sinkronkan...',
           retryAttempts: 3,
           onProgress: queueLiveRefresh,
-          onValidationProgress: queueLiveRefresh,
         });
 
         if (!result.ok) {

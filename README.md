@@ -1,701 +1,133 @@
-# 🕌 Umrah & Hajj AI Travel Assistant — Backend
+# Umrah & Hajj AI Assistant (Backend)
 
-Express.js backend for an AI-powered Umrah & Hajj travel assistant. It can:
+Backend lokal single-user untuk asisten chat Umrah/Hajj dengan data jamaah langsung dari SGO Admin. Seluruh sinkronisasi berjalan **di dalam satu proses Node.js lokal**: tanpa Vercel/serverless, tanpa request batch bertahap, dan tanpa batas buatan jumlah halaman atau record.
 
-1. **Index an agency website** (`/api/index-url`) — scrapes packages, facilities, prices, and FAQs into clean AI context.
-2. **Chat** (`/api/chat`) — intent-aware replies: sapaan/obrolan/keluhan/FAQ dijawab Gemini (`GEMINI_MODEL` + fallback), sedangkan pencarian jamaah dijalankan lokal dari data SGO.
-3. **Real-time SGO scraping** (`/api/jamaah/scrape-cookie`, `/api/jamaah/fetch-env`) — HTTP request langsung ke `https://sgo.rahmahgrup.id` memakai `SGO_ADMIN_SESSION`, untuk satu modul atau seluruh 16 modul.
-4. **Raw response persistence** — HTML asli dari lima modul operasional disimpan ke `sgo_raw/` dan bisa dicek metadatanya lewat `GET /api/sgo/responses`.
-5. **No mock data** — bila belum ada hasil scrape atau SGO gagal diakses, response berisi `count: 0` dan daftar kosong. `/api/seats` juga kosong sampai sumber seat real terhubung.
-6. **Rapihin Kata (Rahmah Style)** (`POST /api/message/rapihin`) — menghaluskan draf FU dokumen, FU pelunasan, dan balasan chat operasional. Fakta penting (nama, kode order, nominal, tautan, daftar dokumen) divalidasi; bila Gemini tidak tersedia atau menghilangkan fakta, teks memakai perapi lokal yang aman.
+## Menjalankan secara lokal
 
-> **Location:** this backend lives in `umrah-ai-backend/` so it does not overwrite the existing Electron app in the parent folder.
+Butuh Node.js 22 atau lebih baru.
 
----
-
-## 📁 Project structure
-
-```
-umrah-ai-backend/
-├── .env                  # Local configuration (do not commit)
-├── .env.example          # Configuration template
-├── .gitignore
-├── package.json          # ESM, start/dev scripts
-├── server.js             # Express app + API endpoints
-├── README.md
-├── data/
-│   ├── jamaahStore.js    # Store real SGO + findJamaah() + scoring
-│   └── sgoRawStore.js    # Persistensi HTML asli 5 modul SGO
-├── sgo_raw/              # Generated: respons mentah SGO (PII, ignored)
-└── services/
-    ├── scraper.js        # scrapeWebContext(url)
-    ├── sgoScraper.js     # Cookie SGO, fetch 16 modul, parser, formatter
-    └── aiEngine.js       # Gemini + local jamaah search
-```
-
----
-
-## 🚀 Quick start
-
-### 1. Install dependencies
-
-```powershell
+```bash
 cd umrah-ai-backend
 npm install
+cp .env.example .env
+# Isi GEMINI_API_KEY di .env (opsional untuk chat AI; fitur lain tetap jalan)
+node server.js
 ```
 
-### 2. Configure `.env`
+Server: `http://localhost:3000`
+Health check: `GET http://localhost:3000/api/health`
 
-Copy `.env.example` to `.env`, lalu isi API key Gemini dan cookie SGO Admin:
+Mode development dengan auto-reload:
 
-```env
-PORT=3000
-AI_PROVIDER=gemini
-GEMINI_API_KEY=your_real_key
-GEMINI_MODEL=gemini-3.6-flash
-GEMINI_FALLBACK_MODEL=gemini-3.8-flash,gemini-flash-latest
-SGO_BASE_URL=https://sgo.rahmahgrup.id
-SGO_ADMIN_SESSION=your_sgo_admin_session
-SGO_PAGINATION_DELAY_MS=500
-SGO_BATCH_PAGES=2
-SGO_MANIFEST_BATCH_SIZE=50
-SGO_RAW_DIR=sgo_raw
+```bash
+npm run dev
 ```
 
-> `gemini-2.0-flash` sudah dihentikan Google (404). Model utama dibaca dari
-> `GEMINI_MODEL`; bila model itu 404/503/quota, `aiEngine.js` otomatis mencoba
-> daftar `GEMINI_FALLBACK_MODEL` (dipisah koma) sebelum memakai fallback lokal.
-> Pesan sapaan, obrolan, keluhan, dan FAQ dikirim ke Gemini lebih dulu; server
-> tetap ramah bila seluruh model sedang tidak tersedia. Pencarian data jamaah
-> selalu lokal.
-> Pencarian nama memakai kecocokan **kata utuh** (semua kata kunci wajib ada),
-> sehingga `juhandi` tidak akan cocok ke `Andi Fitria`. Semua pencarian bersifat
-> case-insensitive dan mendukung NIK/paspor, order ID full/parsial (mis.
-> `3693`, `ORD-2026-UMR-0053`), serta nomor RTB.
+## Cookie SGO (perangkat lokal)
 
-### 3. Start the server
+Data jamaah hanya diambil dari SGO Admin memakai cookie sesi yang disimpan **per perangkat** sebagai HttpOnly cookie (`sgo_device_session`, nama dapat diubah lewat `SGO_DEVICE_COOKIE_NAME`) lewat tombol **Cookie SGO** di header UI.
 
-```powershell
-npm run dev     # nodemon, auto-restart
-# or
-npm start       # plain node
+- Tempel cookie dari SGO Admin (mis. `sgo_admin_session=...` atau token sesinya), lalu klik Simpan Cookie.
+- Cookie dipakai ulang untuk setiap request SGO dalam satu sesi sinkronisasi.
+- Tidak ada cookie fallback dari `.env` dan tidak ada variabel `SGO_ADMIN_SESSION`.
+- Cookie tidak pernah dikirim ke prompt AI atau ditulis ke log.
+
+## Sinkronisasi penuh (satu request)
+
+```http
+POST /api/jamaah/full-sync
+Content-Type: application/json
+
+{}
 ```
 
-You should see:
+Body opsional:
 
-```
-🕌 Umrah & Hajj AI Assistant
-   Server   : http://localhost:3000
-   AI       : gemini [READY] -> gemini-3.6-flash
-   Models   : gemini-3.6-flash | gemini-3.8-flash | gemini-flash-latest
-   SGO Cookie: SET (.env)
-```
-
-### 4. Ambil data jamaah dari SGO Admin
-
-Di UI, pilih **Semua Modul (Unified Full Scrape)** lalu klik **Mulai Unified
-Auto-Scrape**, atau pilih satu modul untuk scrape fokus. Isi **Base URL** dan
-**Cookie** bila ingin menimpanya; biarkan **kosong** agar otomatis memakai
-`SGO_BASE_URL` / `SGO_ADMIN_SESSION` dari `.env`.
-
-16 modul SGO yang didukung:
-
-| Modul | Endpoint | Sumber data jamaah |
-| --- | --- | --- |
-| Monitoring Jamaah | `/ops/monitoring-jamaah` | ✅ ya |
-| Invoice Manual | `/ops/invoice-manual` | — |
-| B2B Rahmah | `/ops/b2b-rahmah` | — |
-| Penagihan & Aging | `/ops/penagihan-aging` | — |
-| Add On Perbatch | `/ops/add-on?tab=perbatch` | — |
-| Rahmah Miles | `/ops/rahmah-miles` | — |
-| Nusuk Mutamer | `/ops/nusuk-mutamer` | — |
-| Upload Documents | `/ops/upload-documents` | — |
-| Approval Dokumen | `/ops/approval-dokumen` | — |
-| Itinerary | `/ops/itinerary` | — |
-| Bus Addon / Visa | `/ops/bus-addon/visa` | — |
-| Hotel | `/ops/hotel` | — |
-| Travel Dokumen Detail | `/ops/travel-dokumen-detail` | — |
-| Travel Docs | `/ops/travel-docs` | — |
-| Satgas Bandara | `/ops/satgas-bandara` | — |
-| Stock Perlengkapan | `/ops/stock-perlengkapan` | — |
-
-Modul di luar daftar tersebut ditolak `400` (`SGO_MODULE`). Pilihan **Semua
-Modul** menjalankan unified scrape seluruh endpoint; pilihan fokus disimpan
-di `localStorage` (`umrah_active_focus_v2`). Hanya Monitoring Jamaah yang
-mengisi `jamaahStore`; modul lain menampilkan ringkasan halamannya.
-
-> Upload file dan paste data **dinonaktifkan** (`410`). Satu-satunya jalur
-> ingest jamaah adalah scrape real-time SGO. Hasil scrape Monitoring Jamaah
-> yang valid otomatis disimpan ke **`jamaah_data.json`** di root backend (bisa
-> diubah lewat `JAMAAH_DATA_FILE`) dan dimuat kembali saat server restart.
-> Hasil scrape kosong **tidak** mengosongkan data real lama; response scrape
-> tetap jujur berisi `count: 0`, sedangkan reset manual hanya lewat
-> `POST /api/jamaah/clear`. File berisi data pribadi jamaah, sudah masuk
-> `.gitignore`, dan jangan di-commit. Jika store kosong, terminal menampilkan
-> peringatan agar Monitoring Jamaah di-scrape ulang.
->
-> Sinkronisasi berjalan dua tahap dari satu klik. Tahap 1 mengambil **semua
-> halaman** sampai SGO melaporkan halaman terakhir: halaman 1 memakai URL asli,
-> halaman 2 dan seterusnya memakai `?page=N` dengan jeda default 500 ms. Frontend
-> meminta 1–2 halaman per request, menggabungkan hasilnya, dan terus melanjutkan
-> sampai `hasMore: false`. Tahap 2 memvalidasi NIK/paspor seluruh jamaah yang
-> tersimpan lewat `/api/jamaah/validate-manifest` dalam batch 25–50 record per
-> request. Kedua tahap menampilkan progres `X / total` secara live dan bisa
-> dihentikan/dilanjutkan.
->
-> Ringkasan `fieldCoverage` (`nik`, `passport`, `manifestId`) dikembalikan di
-> response dan ditampilkan di banner startup.
-> Respons HTML asli untuk `/ops/monitoring-jamaah`, `/ops/upload-documents`,
-> `/ops/travel-docs`, `/ops/stock-perlengkapan`, dan `/ops/hotel` disimpan di
-> `sgo_raw/` (bisa diubah lewat `SGO_RAW_DIR`). Folder ini juga berisi PII dan
-> sudah masuk `.gitignore`.
->
-> File `nodemon.json` mengabaikan `jamaah_data*.json`, `sgo_raw/`, dan `*.tmp`,
-> sehingga penulisan data tidak memicu restart di tengah request.
-
-Endpoint yang tersedia:
-
-- `POST /api/jamaah/scrape-cookie` — scrape modul terpilih, atau seluruh 16
-  modul secara paralel bila `focusModule` kosong.
-- `POST /api/jamaah/fetch-env` — fetch cepat modul tertentu memakai cookie `.env`.
-- `GET /api/jamaah/status` — jumlah & sumber data aktif.
-- `GET /api/jamaah` — seluruh data jamaah aktif beserta `jamaahList`.
-- `POST /api/jamaah/clear` — hapus data aktif sekaligus file `jamaah_data.json`.
-- `GET /api/sgo/modules` — daftar 16 modul beserta label dan `jamaahSource`.
-- `GET /api/sgo/responses` — metadata respons mentah SGO per modul (tanpa HTML/PII).
-- `POST /api/chat` - klasifikasi intent: sapaan/obrolan/keluhan/FAQ ke Gemini, pencarian jamaah lokal case-insensitive (nama / NIK / paspor / kode order full-parsial / RTB), hasil kosong dijawab ramah.
-- `POST /api/message/rapihin` — Rapihin Kata (Rahmah Style): haluskan draf FU atau balasan chat, validasi fakta penting, fallback lokal bila Gemini tidak tersedia.
-
-Restart the server after changing `.env`.
-
-> On Windows PowerShell, use `curl.exe` (not `curl`, which aliases `Invoke-WebRequest`). In bash/macOS/Linux the examples work as-is.
-
----
-
-## 🔌 API reference
-
-### `GET /api/health`
-
-```powershell
-curl.exe http://localhost:3000/api/health
-```
-
-Returns server status, active provider/model, uptime, and the currently indexed context.
-
----
-
-### `POST /api/index-url`
-
-Scrapes a public agency page and stores it as the active AI context.
-
-**Body**
-
-```json
-{ "url": "https://www.example-travel.com/paket-umrah" }
-```
-
-**cURL**
-
-```powershell
-curl.exe -X POST http://localhost:3000/api/index-url `
-  -H "Content-Type: application/json" `
-  -d "{\"url\":\"https://www.example-travel.com/paket-umrah\"}"
-```
-
-**Success response**
-
-```json
-{
-  "success": true,
-  "message": "Website berhasil diindeks sebagai AI context.",
-  "context": {
-    "url": "https://www.example-travel.com/paket-umrah",
-    "characters": 8421,
-    "indexedAt": "2026-10-24T10:00:00.000Z",
-    "preview": "# WEBSITE CONTEXT\nSource URL: ..."
-  }
-}
-```
-
-**Error responses**
-
-| Status | Cause |
+| Field | Keterangan |
 | --- | --- |
-| `400` | Missing/invalid `url` |
-| `502` | Site unreachable, timeout, non-HTML, blocked, or too little readable text |
+| `focusModule` | Batasi ke satu modul SGO (default: semua modul). |
+| `url` | Override `SGO_BASE_URL`. |
 
----
+Yang terjadi dalam satu request:
 
-### `POST /api/chat`
+1. Halaman pertama `/ops/upload-documents` diambil untuk mengetahui total halaman.
+2. Semua halaman berikutnya + modul lain diambil dengan pool paralel `SGO_PAGE_CONCURRENCY` (default `8`, rentang `1-10`).
+3. Error transien (timeout, `429`, `5xx`) di-retry dengan exponential backoff; error autentikasi langsung menghentikan sinkronisasi.
+4. Semua baris jamaah digabung, lalu **semua** manifest diperkaya (NIK/paspor) dengan worker paralel `SGO_MANIFEST_CONCURRENCY` (default `8`, rentang `1-16`) tanpa batas record.
+5. Data normalisasi disimpan ke `jamaah_data.json`, cache manifest SQLite diperbarui, dan indeks AI lokal ditulis ke `data/jamaah_ai_index.json`.
+6. Progress live dapat dipantau lewat polling `GET /api/jamaah/scrape-progress` (UI memakai endpoint ini).
 
-Endpoint chat mengklasifikasikan pesan menjadi beberapa intent:
+Contoh ringkas:
 
-- `greeting`, `smalltalk`, `complaint`, `faq`, `general` → dijawab oleh Gemini
-  (`GEMINI_MODEL`, lalu `GEMINI_FALLBACK_MODEL`) terlebih dahulu secara ramah
-  dan natural, lalu fallback lokal bila semua model sedang tidak tersedia.
-- `data-list`, `data-count`, `data-filter`, `data-lookup` → pencarian langsung
-  ke data jamaah SGO. Nama dicocokkan per **kata utuh** dan case-insensitive;
-  NIK/paspor, order ID full/parsial, dan RTB juga didukung. Query berupa angka
-  dicari ke order, NIK/paspor, dan RTB sekaligus.
-- `data-help` → panduan format pencarian.
-
-Pesan obrolan/keluhan/FAQ **tidak** memicu pencarian jamaah. `data-lookup`
-hanya dipilih jika ada ID/kode eksplisit, kata kunci pencarian (`cari`, `nama`,
-`jamaah`, `status`, dll.), nama 2+ kata, atau nama tunggal yang benar-benar ada
-di store. Sisa kata dari kalimat umum seperti `saya mau berangkat` atau
-`ada apa aja` tidak lagi dianggap nama jamaah.
-
-Jika pencarian data kosong, server meminta Gemini menjawab dengan konteks
-"hasil 0" agar tetap ramah. Bila Gemini tidak tersedia, dipakai fallback lokal
-yang ramah — bukan lagi pesan kaku `Data jamaah ... tidak ditemukan.`
-
-**Body**
-
-```json
-{
-  "message": "DARMA MADHIA SAPUTRA"
-}
+```bash
+curl -X POST http://localhost:3000/api/jamaah/full-sync \
+  -H 'Content-Type: application/json' \
+  -d '{}'
 ```
 
-**cURL**
+Respons sukses memuat `count`, `storedJamaahCount`, `jamaahList`, `source`, `fieldCoverage`, `manifest`, `pagination`, `validation`, `syncSummary`, `aiIndex`, `cache`, `modules`, dan `errors`.
+Respons gagal selalu berbentuk `{ "success": false, "error": "...", "code": "..." }` dengan HTTP status `400` (konfigurasi/modul), `401` (cookie kedaluwarsa), `428` (cookie belum diatur), `409` (sync lain berjalan), atau `502` (network/empty).
 
-```powershell
-curl.exe -X POST http://localhost:3000/api/chat `
-  -H "Content-Type: application/json" `
-  -d "{\"message\":\"DARMA MADHIA SAPUTRA\"}"
-```
+Endpoint terkait:
 
-**Response**
-
-```json
-{
-  "success": true,
-  "reply": "📌 **Data Jamaah Ditemukan:**\n- **Nama Lengkap:** DARMA MADHIA SAPUTRA\n- **Kode Order / No. Pendaftaran:** ORD-2026-UMR-005304\n- **Kode RTB:** RTB 297\n- **Paket:** Umroh 2x Jumat + Thoif 12D By IndiGo\n- **Status Pembayaran / Progress:** BELUM LUNAS",
-  "response": "📌 **Data Jamaah Ditemukan:** ...",
-  "message": "📌 **Data Jamaah Ditemukan:** ...",
-  "intent": "data-lookup",
-  "source": "jamaah-data",
-  "provider": "sgo",
-  "model": null,
-  "usedJamaahLookup": true,
-  "matchedCount": 1,
-  "latencyMs": 4
-}
-```
-
-Nilai `source` yang mungkin: `jamaah-data`, `gemini`, `local-fallback`,
-`local`, atau `error`. Field `intent`, `source`, `usedJamaahLookup`,
-`matchedCount`, dan `latencyMs` dipakai UI untuk menampilkan badge jawaban.
-
----
-
-### `POST /api/message/rapihin`
-
-Rapihin Kata (Rahmah Style) untuk draf pesan layanan pelanggan. Dipakai tombol
-**Rapihin Kata** di kartu FU dokumen, FU Pelunasan, dan balasan chat. Hasil
-selalu bisa diedit di modal sebelum disalin.
-
-**Body**
-
-```json
-{
-  "text": "Draf pesan yang ingin dirapikan",
-  "mode": "fu",
-  "facts": ["Nama Jamaah", "ORD-2026-UMR-0042", "KTP", "Paspor"]
-}
-```
-
-- `mode`: `fu` (follow-up dokumen/pembayaran) atau `chat` (balasan operasional).
-- `facts`: fakta tambahan yang wajib tetap ada di hasil akhir (opsional).
-- `text`: maksimal 6.000 karakter.
-
-**Response**
-
-```json
-{
-  "success": true,
-  "text": "Assalamu'alaikum ...",
-  "source": "gemini",
-  "model": "gemini-3.6-flash",
-  "reason": ""
-}
-```
-
-`source` bernilai `gemini` bila hasil AI lolos validasi fakta, atau
-`local-fallback` bila AI tidak aktif, timeout, atau ada fakta yang hilang.
-UI juga merapikan secara lokal di browser bila endpoint tidak dapat dihubungi.
-
----
-
-### `POST /api/jamaah/scrape-cookie`
-
-Scrape satu modul SGO fokus, atau seluruh 16 modul sekaligus bila
-`focusModule` kosong.
-
-**Body**
-
-```json
-{
-  "url": "",
-  "cookie": "",
-  "focusModule": "/ops/monitoring-jamaah"
-}
-```
-
-- `url` / `cookie` kosong → otomatis memakai `SGO_BASE_URL` dan
-  `SGO_ADMIN_SESSION` dari `.env`.
-- `focusModule` kosong → seluruh 16 modul (`SGO_MODULES`).
-- `focusModule` harus salah satu dari 16 endpoint resmi. Nilai lain (mis.
-  `/ops/tidak-ada`) ditolak `400` dengan kode `SGO_MODULE` dan daftar
-  `supportedModules`.
-- Variasi underscore (`/ops/monitoring_jamaah`) dinormalisasi ke endpoint
-  resmi ber-hyphen. Query string seperti `/ops/add-on?tab=perbatch`
-  dipertahankan.
-- Header setiap request: `Cookie: sgo_admin_session=...` +
-  `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`
-  beserta header browser pendukung (`Accept`, `Accept-Language`, `Sec-Fetch-*`).
-- Timeout request halaman SGO default **20000 ms** (`SGO_REQUEST_TIMEOUT_MS`,
-  dibatasi 5–60 detik).
-- Pagination hanya untuk modul sumber jamaah. Halaman 2+ memakai parameter
-  `SGO_PAGE_PARAM` (default `page`) dan diberi jeda
-  `SGO_PAGINATION_DELAY_MS` (default `500`). Tidak ada batas jumlah halaman;
-  loop berhenti saat SGO melaporkan halaman terakhir atau tidak ada halaman
-  berikutnya. Response menyertakan objek `pagination` berisi `pagesFetched`,
-  `rows`, `totalPagesReported`, `nextPage`, `hasMore`, dan `stopReason`
-  (`empty-page`, `duplicate-page`, `no-new-rows`, `auth-error`, dst.).
-- Jika cookie dari UI gagal, server otomatis retry sekali memakai
-  `SGO_ADMIN_SESSION` dari `.env` dan menandai `usedEnvCookie: true`.
-
-**Success response — Monitoring Jamaah (ringkas)**
-
-```json
-{
-  "success": true,
-  "fallback": false,
-  "empty": false,
-  "count": 3120,
-  "storedJamaahCount": 3120,
-  "focusModule": "/ops/monitoring-jamaah",
-  "modules": ["/ops/monitoring-jamaah"],
-  "modulesFailed": [],
-  "totalModules": 1,
-  "pagination": {
-    "enabled": true,
-    "pagesFetched": 1,
-    "pagesWithRows": 1,
-    "rows": 3120,
-    "stopReason": "duplicate-page"
-  },
-  "rawResponse": {
-    "modulePath": "/ops/monitoring-jamaah",
-    "lastAttempt": { "ok": true, "status": 200 },
-    "response": { "status": 200, "rows": 3120, "htmlLength": 123456 }
-  },
-  "jamaahList": [
-    {
-      "nama": "DARMA MADHIA SAPUTRA",
-      "orderId": "ORD-2026-UMR-005304",
-      "shortCode": "5304",
-      "rtb": "RTB 297",
-      "paket": "Umroh 2x Jumat + Thoif 12D By IndiGo",
-      "dokumen": "0/6",
-      "statusDokumen": "BELUM LENGKAP",
-      "statusPembayaran": "BELUM LUNAS"
-    }
-  ],
-  "sample": ["..."]
-}
-```
-
-**Success response — modul operasional**
-
-Selain `/ops/monitoring-jamaah`, 15 modul lain tidak memiliki tabel jamaah.
-Halaman yang berhasil dimuat dikembalikan sebagai:
-
-```json
-{
-  "success": true,
-  "fallback": false,
-  "moduleLoaded": true,
-  "jamaahSource": false,
-  "focusModule": "/ops/hotel",
-  "moduleSummary": {
-    "modulePath": "/ops/hotel",
-    "title": "Hotel — SGO Admin",
-    "heading": "Hotel",
-    "stats": [],
-    "preview": "..."
-  },
-  "count": 3120,
-  "storedJamaahCount": 3120,
-  "jamaahList": [],
-  "rawResponse": {
-    "modulePath": "/ops/hotel",
-    "lastAttempt": { "ok": true, "status": 200 },
-    "response": { "status": 200, "rows": 0, "htmlLength": 54321 }
-  }
-}
-```
-
-Data jamaah lama **tidak dihapus dan tidak ditimpa** oleh modul non-jamaah
-(`merge: true`). `count` tetap jumlah data Monitoring Jamaah yang aktif,
-sehingga pencarian AI tetap berfungsi. Jalankan **Monitoring Jamaah** untuk
-mengisi atau memperbarui data jamaah.
-
-Jika SGO berhasil diakses tetapi modul tidak berisi baris jamaah, response
-tetap `success: true` dengan `empty: true`, `count: 0`, dan `jamaahList: []`.
-Jika koneksi/auth gagal, response berisi `success: false`, `count: 0`,
-`jamaahList: []`, serta `401`/`502` dan `detail` penyebabnya. **Tidak ada
-fallback ke data lokal sebagai pengganti hasil scrape.**
-
-### `GET /api/sgo/responses`
-
-Menampilkan metadata respons mentah SGO yang tersimpan untuk lima modul:
-`/ops/monitoring-jamaah`, `/ops/upload-documents`, `/ops/travel-docs`,
-`/ops/stock-perlengkapan`, dan `/ops/hotel`.
-
-```json
-{
-  "success": true,
-  "total": 5,
-  "withResponse": 2,
-  "modules": [
-    {
-      "modulePath": "/ops/hotel",
-      "label": "Hotel",
-      "updatedAt": "2026-10-26T10:00:00.000Z",
-      "lastAttempt": { "ok": true, "status": 200, "error": "" },
-      "response": {
-        "status": 200,
-        "contentType": "text/html; charset=utf-8",
-        "htmlLength": 54321,
-        "rows": 0,
-        "summary": { "title": "Hotel — SGO Admin", "heading": "Hotel" }
-      }
-    }
-  ]
-}
-```
-
-HTML mentah **tidak** dikirim ke endpoint ini karena berisi PII. File aslinya
-ada di `sgo_raw/` dan hanya untuk diagnostik lokal.
-
----
-
-### `GET /api/seats`
-
-Tidak ada sumber seat real yang terhubung. Endpoint ini sengaja
-mengembalikan daftar kosong; tidak ada angka seat fiktif.
-
-```powershell
-curl.exe http://localhost:3000/api/seats
-```
-
-```json
-{
-  "success": true,
-  "available": false,
-  "source": null,
-  "count": 0,
-  "message": "Belum ada integrasi sumber data seat real. Data seat tidak ditampilkan agar tidak menampilkan angka fiktif.",
-  "seats": []
-}
-```
-
----
-
-## 🧪 Suggested Postman / manual test flow
-
-1. `GET /api/health` → server is up.
-2. `GET /api/jamaah/status` → `count: 0` bila belum ada scrape; tidak ada data contoh.
-3. `GET /api/seats` → `seats: []` dan `available: false`; tidak ada angka seat fiktif.
-4. `POST /api/jamaah/fetch-env` dengan `{"modulePath":"/ops/monitoring-jamaah"}` → scrape real SGO.
-5. `GET /api/sgo/responses` → cek metadata respons mentah yang tersimpan.
-6. `POST /api/chat` dengan nama/NIK/paspor/order/RTB dari hasil scrape → detail jamaah real.
-7. Hapus cookie / gunakan cookie salah → response scrape `count: 0`, `jamaahList: []`, dan error jelas.
-
-### Seat data
-
-Belum ada integrasi seat real. Pesan tentang seat tidak boleh menghasilkan
-angka fiktif/hardcoded; endpoint `/api/seats` mengembalikan kosong dan UI
-menampilkan status "sumber data seat real belum terhubung". Jika nanti ada
-API booking/POS real, sambungkan ke endpoint tersebut dan tampilkan hanya
-angka yang benar-benar diterima.
-
----
-
-## 🛡️ Error handling & fallback behaviour
-
-| Scenario | Behaviour |
+| Endpoint | Fungsi |
 | --- | --- |
-| URL SGO tidak valid / kosong | `400` dengan pesan jelas |
-| Cookie SGO tidak ada | `400`; set `SGO_ADMIN_SESSION` atau isi di UI |
-| Cookie dari UI kedaluwarsa | Retry otomatis sekali dengan cookie `.env`; sukses → `usedEnvCookie: true` + `warning` |
-| Cookie `.env` juga kedaluwarsa | `401` + `count: 0` + `jamaahList: []`; tidak ada data pengganti |
-| `SGO_ADMIN_SESSION` kosong | Log error jelas di terminal; `400` bila cookie UI juga kosong |
-| Modul di luar 16 endpoint resmi | `400` + kode `SGO_MODULE` + `supportedModules`; tidak ada fallback |
-| Modul non-jamaah berhasil dimuat | `success: true` + `moduleLoaded: true`; data jamaah lama dipertahankan dan ditandai `storedJamaahCount` |
-| Modul error HTTP / timeout | Dicatat di `errors`; modul lain tetap diproses |
-| Modul terbuka tetapi 0 baris jamaah | `success: true` + `empty: true` + `count: 0`; daftar kosong |
-| Semua modul gagal / tidak terhubung | `401`/`502` + `count: 0` + `jamaahList: []`; tanpa fallback lokal |
-| Upload/paste data | `410`; hanya scrape SGO yang diizinkan |
-| `jamaah_data.json` korup / tidak valid | File diabaikan, store tetap kosong, error dicatat; scrape ulang |
-| Gagal menulis `jamaah_data.json` | Scrape tetap sukses, data tetap di memori, error izin tulis dicatat |
-| Gagal menulis `sgo_raw/*.json` | Scrape tetap sukses; warning dicatat, respons mentah tidak tersimpan |
-| File tidak bisa dihapus saat clear | Ditulis tombstone `jamaah: []` agar data lama tidak dimuat ulang |
-| Gemini quota / API error | Pesan ramah, server tetap hidup |
-| Invalid JSON body | `400 Invalid JSON body` |
-| Unknown route | `404` JSON response |
-| Port already in use | Clear startup error and exit |
+| `POST /api/jamaah/full-sync` | Sinkronisasi penuh satu request + validasi semua manifest. |
+| `GET /api/jamaah/scrape-progress` | Status progres real-time (tanpa PII). |
+| `POST /api/jamaah/sync-one` | Sinkronisasi ulang satu jamaah dari Upload Manifest. |
+| `POST /api/sgo/cookie` | Simpan cookie SGO per perangkat (HttpOnly). |
+| `POST /api/sgo/cookie/test` | Uji cookie tersimpan. |
+| `GET /api/jamaah/status` | Status data + ringkasan indeks AI lokal. |
+| `GET /api/ai/status` | Status Gemini + ringkasan indeks AI lokal. |
+| `GET /api/health` | Health check server. |
 
-Semua error SGO dicatat di terminal dengan modul, kode, dan statusnya.
+Endpoint batch lama tidak lagi tersedia; satu-satunya alur sinkronisasi penuh adalah `/api/jamaah/full-sync`.
 
----
+## Indeks AI lokal
 
-## 🧠 How it works
+Setiap selesai sinkronisasi (atau saat startup bila belum ada), backend membangun/memperbarui `data/jamaah_ai_index.json` berisi:
 
-```
-POST /api/jamaah/scrape-cookie | /api/jamaah/fetch-env
-  └─ sgoScraper.js
-       dotenv/config → SGO_ADMIN_SESSION + SGO_BASE_URL
-       fetch paralel 16 modul (atau 1 modul fokus) dengan header:
-         Cookie: `sgo_admin_session=...`
-         User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
-       jika cookie UI gagal / 0 baris → retry SEKALI dengan cookie `.env`
-       resolveSgoModule(): hanya 16 endpoint resmi; lainnya `400 SGO_MODULE`
-       extractSgoOrders(): pasangan baris order + baris jamaah
-       → semua halaman digabung dan di-dedupe, tanpa batas 400 atau 20 halaman
-       → setiap jamaah menyimpan manifestId dari `data-mj-open`
-       → frontend mengulang 1–2 halaman/request sampai hasMore=false
-       → setJamaahData()/upsertJamaahRows() menulis semua baris ke jamaah_data.json
+- Total jamaah, order, RTB, serta paket.
+- Jumlah manifest lengkap vs belum lengkap.
+- Jumlah NIK/paspor terisi dan daftar ID yang missing (tanpa nilai NIK/paspor).
+- Breakdown keberangkatan, RTB, dan paket (maksimal 20 item tiap breakdown).
+- Lookup ringkas (`order`, `rtb`, `nama`, `paket`, `orderCounts`) dan ringkasan teks `summaryText`.
 
-POST /api/jamaah/validate-manifest
-  └─ server.js + enrichJamaahWithManifest()
-       → frontend mengulang 25–50 record/request sampai hasMore=false
-       → buka /ops/monitoring-jamaah/{id}/edit?embed=1
-       → no_identitas → NIK (hanya jika identity_type=nik; kitas/kitap tidak)
-       → no_paspor → paspor; juga no_hp, tempat/tanggal lahir, kota/expired paspor
-       → retry otomatis untuk manifest gagal, cache 5 menit
-       → upsertJamaahRows() menyimpan NIK/paspor ke store + cache SQLite
-       → response `validation` berisi total, nextIndex, hasMore, ok, failed
-       → setJamaahData() menulis atomik ke jamaah_data.json + fieldCoverage
-       → modul operasional: `moduleLoaded` + `moduleSummary`, data lama tetap
-       → lima modul terpilih: saveSgoRawResponse() → sgo_raw/*.json (HTML asli)
-       → jika kosong: Puppeteer hanya untuk 1 modul fokus (bukan data pengganti)
-       → jika tetap kosong: `success: true`, `empty: true`, `count: 0`
-       → jika koneksi/auth gagal: `success: false`, `count: 0`, tanpa fallback lokal
-       → restart server: loadJamaahDataFromDisk() memulihkan data + source + coverage
-       → setJamaahData() → formatJamaahList() → response `jamaahList`
+`services/aiEngine.js` menyisipkan `summaryText` ke konteks Gemini sebagai metadata agregat. Chat tidak pernah menerima daftar NIK, paspor, atau nomor HP. Kartu hasil chat dibangun lokal oleh `services/consoleJamaahBridge.js` dengan `buildSafeJamaahRow()`.
 
-POST /api/chat
-  └─ aiEngine.js:
-       1. classifyIntent()
-            greeting / smalltalk / complaint / faq / general
-              → Gemini (GEMINI_MODEL lalu fallback) lebih dulu, fallback lokal bila gagal
-              → tidak pernah memanggil pencarian jamaah / mengubah store
-            data-list / data-count / data-filter / data-lookup
-              → hanya jika ada cue pencarian, ID/kode eksplisit, atau nama valid
-              → pencarian lokal langsung (tanpa Gemini)
-            data-help → panduan format pencarian
-       2. Pencarian lokal dari data hasil scrape (memori + jamaah_data.json)
-            nama: case-insensitive, exact/whole-word lalu substring
-                  (mis. "Nasmi" cocok ke NASMIATI, "Muh" ke MUHAMMAD)
-            NIK / paspor: exact atau substring (NIK min. 4 digit; paspor huruf+angka)
-            order: full/parsial (mis. 005309, 5309, ORD-2026-UMR-005309)
-            RTB: nomor terakhir (RTB-2026-00307 -> 307)
-            query angka: union order + NIK/paspor + RTB
-            query berlabel paspor/NIK tidak memakai digitnya untuk RTB/order
-            daftar / jumlah / filter status, paket, hotel, kota
-            store kosong saat dipanggil -> coba lazy-load dari jamaah_data.json
-          jika ketemu → detail nama, kode order, RTB, paket, status pembayaran,
-                       NIK, paspor, status dokumen, keberangkatan, hotel, no. HP
-          jika tidak → Gemini diberi konteks hasil 0, lalu jawaban ramah
-                         (fallback lokal ramah bila Gemini tidak tersedia)
-          setJamaahData([]) tidak mengosongkan store; clear hanya via API clear
-       3. Gemini
-            model utama: GEMINI_MODEL (default gemini-3.6-flash)
-            fallback: GEMINI_FALLBACK_MODEL (dipisah koma, dicoba berurutan)
-            timeout default 6 dtk, dibatasi maksimal 10 dtk
-       4. error 404 model / 503 overload / 429 quota / timeout
-            → coba model berikutnya; bila semua gagal, fallback ramah
-            (server tetap hidup, pencarian jamaah tetap berfungsi)
-       5. response memuat intent, source, usedJamaahLookup, matchedCount,
-          model, dan latencyMs untuk badge di UI
-```
+## Format pesan WhatsApp
 
-### Environment variables
+Perintah Rapihin Kata mempertahankan pemisah paragraf literal `\n\n` dan tidak mengubah anti-leak: token sesi, cookie, NIK, paspor, dan nomor HP tidak pernah dikirim ke prompt AI maupun dicetak ke log.
 
-| Variable | Default | Purpose |
+## Konfigurasi
+
+Lihat `.env.example`. Ringkasan yang relevan:
+
+| Variabel | Default | Keterangan |
 | --- | --- | --- |
-| `PORT` | `3000` | HTTP port |
-| `AI_PROVIDER` | `gemini` | Gemini only |
-| `GEMINI_API_KEY` | — | Google AI Studio key |
-| `GEMINI_MODEL` | `gemini-3.6-flash` | Model Gemini utama (dibaca dari `.env`) |
-| `GEMINI_FALLBACK_MODEL` | `gemini-3.8-flash,gemini-flash-latest` | Daftar model cadangan, dipisah koma |
-| `GEMINI_TIMEOUT_MS` | `6000` | Timeout request Gemini (dibatasi 1–`10000` ms) |
-| `GEMINI_POLISH_TIMEOUT_MS` | `25000` | Timeout Rapihin Kata (dibatasi 4–`45000` ms) |
-| `SGO_BASE_URL` | — | Base URL SGO Admin |
-| `SGO_ADMIN_SESSION` | — | Cookie sesi admin SGO |
-| `JAMAAH_DATA_FILE` | `jamaah_data.json` (root backend) | Lokasi file penyimpanan permanen hasil scrape |
-| `SGO_REQUEST_TIMEOUT_MS` | `20000` | Timeout fetch per modul SGO (5–60 detik) |
-| `SGO_PAGINATION_ENABLED` | `true` | Pagination modul sumber jamaah |
-| `SGO_PAGINATION_DELAY_MS` | `500` | Jeda antar-fetch halaman (0–10000 ms) |
-| `SGO_PAGE_PARAM` | `page` | Nama parameter query halaman SGO |
-| `SGO_BATCH_PAGES` | `2` | Jumlah halaman per request scrape (1–2) |
-| `SGO_SCRAPE_BUDGET_MS` | `22000` di Vercel | Anggaran waktu per request batch |
-| `SGO_MANIFEST_BATCH_SIZE` | `50` | Jumlah record per request validasi manifest (25–50) |
-| `SGO_RAW_DIR` | `sgo_raw` (root backend) | Folder respons mentah 5 modul SGO (PII, ignored) |
-| `SGO_MANIFEST_CONCURRENCY` | `8` | Jumlah manifest jamaah yang di-fetch paralel (1–20) |
-| `SGO_MANIFEST_TIMEOUT_MS` | `20000` | Timeout per halaman manifest (5–60 detik) |
-| `SGO_MANIFEST_CACHE_MS` | `300000` | Cache in-memory NIK/paspor per manifest (5 menit) |
-| `SGO_MANIFEST_RETRY_CONCURRENCY` | `2` | Concurrency pass retry manifest (1–10) |
-| `SCRAPER_MAX_CHARS` | `30000` | Context size cap |
-| `SCRAPER_TIMEOUT_MS` | `20000` | Website fetch timeout |
+| `PORT` | `3000` | Port server lokal. |
+| `GEMINI_API_KEY` | — | Kunci Gemini untuk chat AI. |
+| `SGO_BASE_URL` | `https://sgo.rahmahgrup.id` | Base URL SGO Admin. |
+| `SGO_REQUEST_TIMEOUT_MS` | `20000` | Timeout per request SGO (maks. 60000). |
+| `SGO_PAGE_CONCURRENCY` | `8` | Paralel request halaman (1-10). |
+| `SGO_MANIFEST_CONCURRENCY` | `8` | Paralel worker manifest (1-16). |
+| `SGO_HTTP_RETRY_ATTEMPTS` | `4` | Percobaan ulang error transien. |
+| `SGO_HTTP_RETRY_BASE_MS` | `1200` | Backoff dasar retry. |
+| `SGO_MANIFEST_TIMEOUT_MS` | `20000` | Timeout request detail manifest. |
+| `SGO_MANIFEST_CACHE_MS` | `300000` | TTL cache manifest. |
+| `JAMAAH_DATA_FILE` | `jamaah_data.json` | Path data jamaah ternormalisasi. |
+| `JAMAAH_AI_INDEX_FILE` | `data/jamaah_ai_index.json` | Path indeks/ringkasan AI lokal. |
+| `SGO_RAW_DIR` | `sgo_raw` | Folder respons mentah SGO (berisi PII; jangan di-commit). |
 
----
+Tidak ada `SGO_ADMIN_SESSION`, `SGO_BATCH_PAGES`, `SGO_SCRAPE_BUDGET_MS`, `SGO_SCRAPE_DEADLINE_MS`, atau `SGO_MANIFEST_BATCH_SIZE`.
 
-## 🔧 Menghubungkan sumber seat real
+## Tes
 
-Saat ini tidak ada database/API seat. `data/mockSeats.js` sudah dihapus dan
-`GET /api/seats` selalu mengembalikan `seats: []` dengan `available: false`.
-Jangan menambahkan angka seat hardcoded.
-
-Jika nanti tersedia API booking/POS real, sambungkan di route `/api/seats`
-(atau service baru) dan kembalikan shape yang sama:
-
-```json
-{
-  "id": "pkg-real-01",
-  "name": "Nama paket dari API",
-  "departure": "2026-12-15",
-  "totalSeat": 45,
-  "remainingSeat": 4,
-  "price": "Rp 28.500.000"
-}
+```bash
+node --check server.js
+node --check services/sgoScraper.js
+node --check public/js/sgo-sync.js
+node --test tests/fu-pelunasan-format.test.js
 ```
 
-Hanya kirim field yang benar-benar diterima dari sumber real. Bila API gagal,
-kembalikan `seats: []` dan pesan error; jangan mengisi dengan data contoh.
-
----
-
-## ⚠️ Production notes
-
-- Hasil scrape jamaah disimpan permanen di `jamaah_data.json` dan dipulihkan saat restart. Web context lain masih **in-memory**; untuk multi-instance gunakan Redis/Postgres.
-- Respons mentah lima modul SGO disimpan di `sgo_raw/` dan dimuat ulang saat dibutuhkan. Folder ini **wajib di-ignore** dan dibatasi aksesnya.
-- Validasi NIK/paspor berjalan sebagai tahap terpisah: 25–50 manifest per request lewat `/api/jamaah/validate-manifest`. Atur `SGO_MANIFEST_BATCH_SIZE`, `SGO_MANIFEST_CONCURRENCY`, `SGO_MANIFEST_TIMEOUT_MS`, dan `SGO_MANIFEST_CACHE_MS` bila server SGO membatasi trafik. Manifest yang gagal otomatis dicoba ulang dengan concurrency lebih rendah dan backoff (lihat `SGO_MANIFEST_RETRY_CONCURRENCY`); detail kegagalan akhir tersedia di `manifest.failures` pada respons validasi.
-- Pagination meminta 1–2 halaman per request (`?page=2`, `?page=3`, dst.) sampai halaman terakhir. Atur `SGO_BATCH_PAGES` (1–2), `SGO_PAGINATION_DELAY_MS` (default 500 ms), dan `SGO_SCRAPE_BUDGET_MS` bila server SGO atau serverless membatasi trafik/waktu.
-- `jamaah_data.json` dan `sgo_raw/*.json` berisi data pribadi jamaah. Jangan di-commit, batasi akses folder, dan terapkan retensi/penghapusan sesuai kebijakan privasi.
-- Add authentication/rate limiting before exposing publicly; CORS is currently open.
-- Scraping must respect each website's Terms of Service and `robots.txt`.
-- For JavaScript-heavy pages, replace the Cheerio fetch with a headless browser (Playwright/Puppeteer).
-- Never commit `.env`; only `.env.example` belongs in version control.
-
----
-
-## 📜 Scripts
-
-```powershell
-npm run dev     # nodemon server.js
-npm start       # node server.js
-```
+Semua file data (`jamaah_data.json`, `sgo_raw/`, `data/jamaah_ai_index.json`, SQLite cache) bersifat lokal dan tidak boleh di-commit.

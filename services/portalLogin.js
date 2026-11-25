@@ -166,7 +166,7 @@ async function lookupSgoPortalTarget(orderCode = '') {
     return { orderCode: '', uniqueCode: '' };
   }
 
-  const config = resolveSgoConfig({ useEnvCookie: true });
+  const config = resolveSgoConfig();
   if (!config.ok) {
     negativeCache.set(code, Date.now());
     return { orderCode: '', uniqueCode: '' };
